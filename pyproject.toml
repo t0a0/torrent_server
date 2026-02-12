@@ -9,13 +9,13 @@ description = "Private torrent queue and delivery server"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "aiogram>=3.13.1,<4.0.0",
-  "qbittorrent-api>=2024.8.65",
+  "aiogram~=3.13.1",
+  "qbittorrent-api~=2024.8",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "ruff>=0.6.8",
+  "ruff~=0.6.8",
 ]
 
 [tool.setuptools]
