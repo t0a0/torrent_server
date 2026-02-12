@@ -16,6 +16,12 @@ Private torrent queue + delivery server controlled via Telegram bot.
 - Secrets (bot token, qBittorrent credentials, token signing secret) are loaded from `.env`.
 - Telegram allowlist is configured via `TELEGRAM_ALLOWED_USER_IDS`.
 
+## Secret handling policy
+
+- `.env.example` is committed **on purpose** as a template with placeholder values only.
+- Real secrets must go in local `.env` (or your secret manager in production) and are ignored by git.
+- Never commit real bot tokens, qBittorrent passwords, or signing secrets.
+
 ## Configuration
 
 1. Copy `.env.example` to `.env`.
