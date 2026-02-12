@@ -69,6 +69,11 @@ Run relevant commands based on repo contents. Typical examples:
 
 If a command cannot run due to environment limits, report that clearly.
 
+## Interaction mode defaults
+- Default to **Q&A mode** (chat-only response, no file edits) unless the user explicitly asks to implement, patch, or commit code.
+- Enter **Implementation mode** only when the user explicitly requests code/config/file changes.
+- If intent is ambiguous, prefer a brief clarifying chat response over making repository changes.
+
 ## Change discipline
 - Keep diffs minimal and task-focused.
 - Do not perform unrelated refactors.
