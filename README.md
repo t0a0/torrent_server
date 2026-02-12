@@ -35,6 +35,7 @@ Private torrent queue + delivery server controlled via Telegram bot.
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_ALLOWED_USER_IDS`
    - `QBITTORRENT_USERNAME` and `QBITTORRENT_PASSWORD`
+   - `QBITTORRENT_TZ` (defaults to `Europe/Berlin`)
    - `DOWNLOAD_TOKEN_SECRET`
    - `DOWNLOAD_BASE_URL`
 
