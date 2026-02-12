@@ -1,0 +1,16 @@
+# Local secret configuration
+.env
+.env.*
+!.env.example
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local virtual environments
+.venv/
+
+# Runtime data
+data/
