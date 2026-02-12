@@ -1,43 +1,65 @@
-# Torrent Server (Phase 1 Scaffold)
+# Torrent Server (Phase 2: Security Baseline)
 
 Private torrent queue + delivery server controlled via Telegram bot.
 
-## What is included in this phase
+This repository is currently in **Phase 2** of the implementation plan: security baseline controls are in place, while core queue/status/delivery flows remain incremental.
 
-- Python application scaffold with focused packages (`app/bot`, `app/services`, `app/db`, `app/api`, `app/security`).
+## Implemented in Phase 2
+
 - Environment-driven runtime configuration validation.
 - qBittorrent client wrapper based on `qbittorrent-api`.
+- Telegram runtime allowlist enforcement middleware for bot handlers.
+- HMAC-signed expiring download token utilities and verification.
+- Download-route skeleton that enforces token validity.
 - Docker Compose setup for bot service + internal qBittorrent service.
-- Lightweight scaffold validation through linting and runtime checks (no maintained test suite yet).
 
-## Security notes
+## Security baseline behavior
 
-- qBittorrent Web UI is **not published** on a host port in `docker-compose.yml`; it stays internal to the Compose network.
+- qBittorrent Web UI is **not published** on a host port in `docker-compose.yml`; it stays internal to the Compose network. Do not expose it directly to the public internet.
 - Secrets (bot token, qBittorrent credentials, token signing secret) are loaded from `.env`.
-- Telegram allowlist is configured via `TELEGRAM_ALLOWED_USER_IDS`.
+- Telegram allowlist is configured with `TELEGRAM_ALLOWED_USER_IDS` and enforced at runtime.
+- Download links are tokenized and expiring.
+
+### Telegram allowlist enforcement
+
+- Incoming bot events are checked against `TELEGRAM_ALLOWED_USER_IDS`.
+- If a user is not allowlisted, the bot returns:
+  - `Unauthorized: this bot is restricted to approved users.`
+- Unauthorized users are blocked before handlers execute.
+
+### Expiring download token behavior
+
+- Token format: `base64url(payload).base64url(signature)`.
+- Payload fields:
+  - `ref` (torrent/file path reference)
+  - `exp` (UNIX expiry timestamp)
+- Signature algorithm: HMAC-SHA256 using `DOWNLOAD_TOKEN_SECRET`.
+- Verification outcome:
+  - invalid/tampered token → `403`
+  - expired token → `410`
+- Default token TTL is controlled by `DOWNLOAD_TOKEN_TTL_SECONDS` (default `3600`).
+
+### Secret rotation note
+
+- Rotating `DOWNLOAD_TOKEN_SECRET` invalidates active download links signed with the previous secret.
+- Rotate during a maintenance window if preserving currently issued links is required.
 
 ## Secret handling policy
 
-- `.env.example` is committed **on purpose** as a template with placeholder values only.
-- Real secrets must go in local `.env` (or your secret manager in production) and are ignored by git.
-- Never commit real bot tokens, qBittorrent passwords, or signing secrets.
-
-## Current testing policy
-
-- This repository currently does **not** maintain an automated test suite.
-- Validation is currently done with linting plus manual runtime verification.
-- We can add tests later when feature flows stabilize.
+- `.env.example` is committed as a template with placeholders only.
+- Real secrets belong in local `.env` (or your secret manager in production) and must never be committed.
 
 ## Configuration
 
 1. Copy `.env.example` to `.env`.
-2. Fill in all secret values:
+2. Fill in required values:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_ALLOWED_USER_IDS`
    - `QBITTORRENT_USERNAME` and `QBITTORRENT_PASSWORD`
    - `QBITTORRENT_TZ` (defaults to `Europe/Berlin`)
    - `DOWNLOAD_TOKEN_SECRET`
    - `DOWNLOAD_BASE_URL`
+   - `DOWNLOAD_TOKEN_TTL_SECONDS`
 
 ## Local run
 
@@ -56,15 +78,17 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-## Verify current scaffold
+## Verification commands
 
 ```bash
 docker compose config
+pytest -q
 ruff check .
 ```
 
-## Next implementation slice
+## Next (Phase 3)
 
-- Add Telegram handlers for `/add` and `/status`.
-- Persist queue state in SQLite repositories.
-- Expose tokenized expiring download route.
+- Queue ingress (`/add`, optional torrent-file upload).
+- Status tracking (`/status`, polling/sync workflow).
+- Expiring link issuance for completed items.
+- Retention/cleanup controls to prevent disk exhaustion.
