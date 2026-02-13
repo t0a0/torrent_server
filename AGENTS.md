@@ -19,15 +19,16 @@ Primary stack and constraints:
 Implement bot command handling and user authorization:
 - `/start`
 - `/add`
-- `/adduser <username>`
-- `/removeuser <username>`
+- `/removeuser <user_id>`
+- `/generateaccesstoken`
+- `/authenticate <token>`
 - `/whitelist`
 
 Authorization rules:
-- Only **whitelisted usernames** can interact with the bot.
-- `/adduser`, `/removeuser`, and `/whitelist` are **admin-only**.
-- Admin-only means only the owner username (project maintainer) can run those commands.
-- Other whitelisted users can use non-admin commands like `/start` and `/add`, but not admin commands.
+- Only authenticated/whitelisted users (stored by Telegram `user_id`) can use `/start` and `/add`.
+- `/generateaccesstoken`, `/removeuser`, and `/whitelist` are **admin-only**.
+- Admin-only means only the owner account (project maintainer) can run those commands.
+- Any user can call `/authenticate <token>`; valid non-expired tokens whitelist that caller `user_id`.
 
 ### Phase 2 (Torrent engine and download delivery)
 Integrate qBittorrent operations:
@@ -46,7 +47,7 @@ Connect phase 1 and phase 2 behavior:
 ## Implementation expectations for future tasks
 When implementing features in this repository, prefer:
 - Clear separation of concerns (Telegram handlers, auth/whitelist service, torrent service, download-link service).
-- Configuration through environment variables (bot token, owner username, storage paths, qBittorrent connection, token TTL, etc.).
+- Configuration through environment variables (bot token, owner user_id, storage paths, qBittorrent connection, token TTL, etc.).
 - Docker-first setup for local and server execution.
 - Async-friendly design to align with `aiogram` and background task/event handling.
 
@@ -60,9 +61,10 @@ When implementing features in this repository, prefer:
 ## Suggested command behavior reference
 - `/start`: greet user and explain available commands based on role.
 - `/add`: accept magnet link or torrent file and queue download.
-- `/adduser <username>`: owner-only; add username to whitelist.
-- `/removeuser <username>`: owner-only; remove username from whitelist.
-- `/whitelist`: owner-only; list whitelisted usernames.
+- `/generateaccesstoken`: owner-only; create a single-use access token (30-minute TTL).
+- `/authenticate <token>`: redeem a valid token and whitelist caller by `user_id`.
+- `/removeuser <user_id>`: owner-only; remove user from whitelist by `user_id`.
+- `/whitelist`: owner-only; list whitelisted users (`user_id`, username at authentication).
 
 ## Out-of-scope unless requested
 - UI/front-end work.
