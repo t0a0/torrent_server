@@ -23,9 +23,11 @@
    cp .env.example .env
    ```
 
-5. Edit `.env` and set your Telegram bot token:
+5. Edit `.env` and set your Telegram bot settings:
    ```env
    TELEGRAM_BOT_TOKEN=your_real_bot_token
+   BOT_OWNER_USER_ID=123456789
+   BOT_OWNER_USERNAME=optional_fallback_username
    ```
 
 6. Start the bot:
@@ -33,4 +35,10 @@
    python3 -m app.bot.main
    ```
 
-When the bot is running, send `/start` (or other Phase 1 commands) to your bot in Telegram and check terminal output.
+## Phase 1 command flow
+
+- `/generateaccesstoken` (admin only): creates a secure, single-use token valid for 30 minutes.
+- `/authenticate <token>`: redeems token, whitelists caller by Telegram `user_id`, and stores username at authentication time.
+- `/whitelist` (admin only): lists whitelisted users.
+- `/removeuser <user_id>` (admin only): removes a user from whitelist.
+- `/start` and `/add`: available only for whitelisted users.
