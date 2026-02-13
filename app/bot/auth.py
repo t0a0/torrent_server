@@ -28,11 +28,6 @@ class AuthService:
         self._tokens: dict[str, datetime] = {}
         self._whitelist: dict[int, WhitelistedUser] = {}
 
-        if owner_user_id is not None:
-            self._whitelist[owner_user_id] = WhitelistedUser(
-                user_id=owner_user_id,
-                username_at_authentication=None,
-            )
 
     @staticmethod
     def _normalize_username(username: str | None) -> str | None:
@@ -51,7 +46,7 @@ class AuthService:
         return self._owner_user_id is not None and user_id == self._owner_user_id
 
     def is_whitelisted(self, user_id: int) -> bool:
-        return user_id in self._whitelist
+        return self.is_admin(user_id) or user_id in self._whitelist
 
     def generate_access_token(self) -> str:
         self._purge_expired_tokens()
