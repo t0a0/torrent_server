@@ -6,7 +6,7 @@ This repository is for a **torrent server controlled by a Telegram bot**.
 Primary stack and constraints:
 - Python (latest stable version)
 - Telegram bot API via `aiogram`
-- Torrent control via a qBittorrent Python library
+- Torrent control via `python-qbittorrent`
 - Docker for build and deployment
 
 ## Working mode defaults
@@ -33,7 +33,8 @@ Authorization rules:
 Integrate qBittorrent operations:
 - Add torrent by file and by magnet link.
 - Download torrent payload to local server storage.
-- Generate a **short-lived tokenized URL** for downloading completed files.
+- First iteration: generate the **simplest working download URL** for completed files (static URL is acceptable).
+- Later iteration (optional hardening): switch to **short-lived tokenized URLs**.
 - Delete torrent from queue.
 - Auto-delete torrent from queue after download completion.
 
@@ -52,7 +53,8 @@ When implementing features in this repository, prefer:
 ## Security and access notes
 - Treat whitelist and owner checks as mandatory guardrails.
 - Validate usernames and command inputs.
-- Tokenized download URLs must be expiring and unguessable.
+- For first iteration, static URLs are acceptable for speed of delivery.
+- If/when tokenized URLs are introduced, they must be expiring and unguessable.
 - Restrict file serving to expected download directories.
 
 ## Suggested command behavior reference
