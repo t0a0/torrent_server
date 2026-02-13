@@ -6,7 +6,6 @@ import os
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _BOT_TOKEN_KEY = "TELEGRAM_BOT_TOKEN"
 _OWNER_USER_ID_KEY = "BOT_OWNER_USER_ID"
-_OWNER_USERNAME_KEY = "BOT_OWNER_USERNAME"
 
 
 def load_env_file(env_path: Path = _ENV_FILE) -> None:
@@ -47,11 +46,3 @@ def get_owner_user_id() -> int | None:
     except ValueError as exc:
         raise ValueError(f"Invalid integer in {_OWNER_USER_ID_KEY}: {raw_user_id}") from exc
 
-
-def get_owner_username() -> str | None:
-    """Resolve optional owner username used as a fallback admin identifier."""
-    load_env_file()
-    username = os.getenv(_OWNER_USERNAME_KEY)
-    if not username:
-        return None
-    return username

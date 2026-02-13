@@ -5,13 +5,10 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from .auth import AuthService
-from .config import get_owner_user_id, get_owner_username
+from .config import get_owner_user_id
 
 router = Router(name="phase1_handlers")
-auth_service = AuthService(
-    owner_user_id=get_owner_user_id(),
-    owner_username=get_owner_username(),
-)
+auth_service = AuthService(owner_user_id=get_owner_user_id())
 
 
 def _get_actor(message: Message) -> tuple[int, str | None] | None:
@@ -27,8 +24,8 @@ async def _require_admin(message: Message) -> tuple[int, str | None] | None:
         await message.answer("Cannot resolve caller identity.")
         return None
 
-    user_id, username = actor
-    if not auth_service.is_admin(user_id=user_id, username=username):
+    user_id, _ = actor
+    if not auth_service.is_admin(user_id=user_id):
         await message.answer("This command is admin-only.")
         return None
     return actor

@@ -47,7 +47,7 @@ Connect phase 1 and phase 2 behavior:
 ## Implementation expectations for future tasks
 When implementing features in this repository, prefer:
 - Clear separation of concerns (Telegram handlers, auth/whitelist service, torrent service, download-link service).
-- Configuration through environment variables (bot token, owner username, storage paths, qBittorrent connection, token TTL, etc.).
+- Configuration through environment variables (bot token, owner user_id, storage paths, qBittorrent connection, token TTL, etc.).
 - Docker-first setup for local and server execution.
 - Async-friendly design to align with `aiogram` and background task/event handling.
 

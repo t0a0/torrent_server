@@ -23,17 +23,15 @@ class AuthService:
     def __init__(
         self,
         owner_user_id: int | None = None,
-        owner_username: str | None = None,
     ) -> None:
         self._owner_user_id = owner_user_id
-        self._owner_username = self._normalize_username(owner_username)
         self._tokens: dict[str, datetime] = {}
         self._whitelist: dict[int, WhitelistedUser] = {}
 
         if owner_user_id is not None:
             self._whitelist[owner_user_id] = WhitelistedUser(
                 user_id=owner_user_id,
-                username_at_authentication=self._owner_username,
+                username_at_authentication=None,
             )
 
     @staticmethod
@@ -49,11 +47,8 @@ class AuthService:
         for token in expired_tokens:
             self._tokens.pop(token, None)
 
-    def is_admin(self, user_id: int, username: str | None) -> bool:
-        if self._owner_user_id is not None and user_id == self._owner_user_id:
-            return True
-        normalized = self._normalize_username(username)
-        return normalized is not None and normalized == self._owner_username
+    def is_admin(self, user_id: int) -> bool:
+        return self._owner_user_id is not None and user_id == self._owner_user_id
 
     def is_whitelisted(self, user_id: int) -> bool:
         return user_id in self._whitelist

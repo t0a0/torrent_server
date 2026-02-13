@@ -27,7 +27,6 @@
    ```env
    TELEGRAM_BOT_TOKEN=your_real_bot_token
    BOT_OWNER_USER_ID=123456789
-   BOT_OWNER_USERNAME=optional_fallback_username
    ```
 
 6. Start the bot:
