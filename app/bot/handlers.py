@@ -48,8 +48,19 @@ async def _require_whitelisted(message: Message) -> tuple[int, str | None] | Non
 
 @router.message(Command("start"))
 async def handle_start(message: Message) -> None:
-    if await _require_whitelisted(message) is None:
+    actor = _get_actor(message)
+    if actor is None:
+        await message.answer("Cannot resolve caller identity.")
         return
+
+    user_id, _ = actor
+    if not auth_service.is_whitelisted(user_id):
+        await message.answer(
+            "You are not whitelisted yet. Request an access token from the admin and "
+            "use /authenticate <token> to get whitelisted before using the bot."
+        )
+        return
+
     await message.answer("Welcome! Use /add to submit a torrent or magnet link.")
 
 
