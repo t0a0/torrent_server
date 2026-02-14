@@ -36,7 +36,7 @@ class TorrentService:
         qbittorrent_username: str | None = None,
         qbittorrent_password: str | None = None,
         downloads_root: Path | None = None,
-        completion_poll_interval_seconds: float = 5.0,
+        completion_poll_interval_seconds: float = 30.0,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
@@ -75,7 +75,12 @@ class TorrentService:
         self._client.download_from_link(magnet, savepath=str(save_path))
 
     def _start_completion_cleanup_worker(self) -> None:
-        """Run one background worker that removes all completed torrents from queue."""
+        """Run one daemon background worker that removes completed torrents from queue.
+
+        The worker loop is intentionally long-lived and exits only when the Python process
+        shuts down. Because the thread is daemonized, it is automatically terminated on
+        process exit and does not block application shutdown.
+        """
         threading.Thread(target=self._completion_cleanup_loop, daemon=True).start()
 
     def _completion_cleanup_loop(self) -> None:
