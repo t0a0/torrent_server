@@ -82,7 +82,7 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
 
     user_id, username = actor
     if auth_service.is_whitelisted(user_id):
-        await message.answer("You are already whitelisted")
+        await message.answer("You are already whitelisted. Auth token was not consumed.")
         return
 
     token = (command.args or "").strip()
