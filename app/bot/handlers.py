@@ -128,10 +128,11 @@ async def handle_whitelist(message: Message) -> None:
 
     lines = ["Whitelisted users:"]
     for user in users:
-        username = user.username_at_authentication or "<none>"
+        username = user.username_at_authentication
+        username_display = f"@{username}" if username else "<none>"
         lines.append(
             f"- user_id=<code>{user.user_id}</code>, "
-            f"username_at_authentication={escape(username)}"
+            f"username_at_authentication={escape(username_display)}"
         )
 
     await message.answer("\n".join(lines), parse_mode="HTML")
