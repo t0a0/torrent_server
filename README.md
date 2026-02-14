@@ -27,9 +27,9 @@
    ```env
    TELEGRAM_BOT_TOKEN=your_real_bot_token
    BOT_OWNER_USER_ID=123456789
-HFS_BASE_URL=https://files.example.com
-DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
-DOWNLOAD_LINK_TTL_SECONDS=1800
+   HFS_BASE_URL=https://files.example.com
+   DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
+   DOWNLOAD_LINK_TTL_SECONDS=1800
    ```
 
 6. Start the bot:
@@ -87,6 +87,22 @@ python3 -m app.bot.main
 
 > Note: at the moment `/add` is still a placeholder handler and does not yet call `TorrentService`. Phase 3 will wire bot messages/files into qBittorrent.
 
+
+
+For Docker Compose deployments, set:
+
+```env
+DOWNLOADS_ROOT=/downloads
+HFS_BASE_URL=http://localhost:8081
+DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
+DOWNLOAD_LINK_TTL_SECONDS=1800
+```
+
+Generate a strong random secret for `DOWNLOAD_LINK_SECRET` (example):
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
 
 
 ## Docker Compose stack (bot + qBittorrent + HFS file-server)
