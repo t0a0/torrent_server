@@ -11,6 +11,11 @@ router = Router(name="phase1_handlers")
 auth_service = AuthService(owner_user_id=get_owner_user_id())
 
 
+def _escape_markdown_v2(value: str) -> str:
+    escape_chars = r"_[]()~`>#+-=|{}.!"
+    return "".join(f"\\{char}" if char in escape_chars else char for char in value)
+
+
 def _get_actor(message: Message) -> tuple[int, str | None] | None:
     actor = message.from_user
     if actor is None:
@@ -126,9 +131,17 @@ async def handle_whitelist(message: Message) -> None:
 
     lines = ["Whitelisted users:"]
     for user in users:
+        if user.username_at_authentication:
+            escaped_username = _escape_markdown_v2(user.username_at_authentication)
+            username_display = (
+                f"[@{escaped_username}](https://t.me/{user.username_at_authentication})"
+            )
+        else:
+            username_display = "N/A"
+
         lines.append(
-            f"- user_id={user.user_id}, "
-            f"username_at_authentication={user.username_at_authentication}"
+            f"- user_id=`{user.user_id}`, "
+            f"username_at_authentication={username_display}"
         )
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="MarkdownV2")
