@@ -7,9 +7,26 @@ server {
     autoindex_exact_size off;
     autoindex_localtime on;
 
-    location / {
-        secure_link $arg_sig,$arg_expires;
-        secure_link_md5 "$secure_link_expires$uri$arg_nonce ${DOWNLOAD_LINK_SECRET}";
+    # Only allow files rooted under /<telegram_user_id>/...
+    location ~ ^/(?<uid>\d+)(/.*)?$ {
+        # Prefer query args; fall back to auth cookie so autoindex-generated links
+        # (which omit query params) remain accessible within the same user scope.
+        set $auth_expires $arg_expires;
+        set $auth_nonce $arg_nonce;
+        set $auth_sig $arg_sig;
+
+        if ($auth_expires = "") {
+            set $auth_expires $cookie_dl_expires;
+        }
+        if ($auth_nonce = "") {
+            set $auth_nonce $cookie_dl_nonce;
+        }
+        if ($auth_sig = "") {
+            set $auth_sig $cookie_dl_sig;
+        }
+
+        secure_link $auth_sig,$auth_expires;
+        secure_link_md5 "$secure_link_expires/$uid/$auth_nonce ${DOWNLOAD_LINK_SECRET}";
 
         if ($secure_link = "") {
             return 403;
@@ -19,6 +36,19 @@ server {
             return 410;
         }
 
+        # Persist validated auth in cookie for this user path so child links from
+        # nginx autoindex continue to work without explicit query propagation.
+        if ($arg_sig != "") {
+            add_header Set-Cookie "dl_expires=$arg_expires; Path=/$uid/; HttpOnly; SameSite=Lax" always;
+            add_header Set-Cookie "dl_nonce=$arg_nonce; Path=/$uid/; HttpOnly; SameSite=Lax" always;
+            add_header Set-Cookie "dl_sig=$arg_sig; Path=/$uid/; HttpOnly; SameSite=Lax" always;
+        }
+
         try_files $uri $uri/ =404;
+    }
+
+    # Deny any path not matching /<numeric_user_id>/...
+    location / {
+        return 403;
     }
 }
