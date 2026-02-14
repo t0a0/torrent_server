@@ -41,9 +41,7 @@ class DownloadLinkService:
     ) -> None:
         self._hfs_base_url = hfs_base_url if hfs_base_url is not None else get_hfs_base_url()
         self._signing_secret = (
-            signing_secret.encode("utf-8")
-            if signing_secret is not None
-            else get_download_link_secret().encode("utf-8")
+            signing_secret if signing_secret is not None else get_download_link_secret()
         )
         self._ttl_seconds = ttl_seconds if ttl_seconds is not None else get_download_link_ttl_seconds()
         self._downloads_root = (downloads_root or get_downloads_root()).resolve()
@@ -95,6 +93,7 @@ class DownloadLinkService:
         )
 
     def _build_signature(self, user_id: int, expires: int, nonce: str) -> str:
-        payload = f"{user_id}:{expires}:{nonce}".encode("utf-8")
-        digest = hmac.new(self._signing_secret, payload, hashlib.sha256).digest()
+        uri = f"/{user_id}/"
+        payload = f"{expires}{uri}{nonce} {self._signing_secret}".encode("utf-8")
+        digest = hashlib.md5(payload).digest()
         return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
