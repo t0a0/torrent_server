@@ -98,6 +98,12 @@ DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
 ```
 
+Generate a strong random secret for `DOWNLOAD_LINK_SECRET` (example):
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
 
 ## Docker Compose stack (bot + qBittorrent + HFS file-server)
 
