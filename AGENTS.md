@@ -59,12 +59,13 @@ When implementing features in this repository, prefer:
 - Restrict file serving to expected download directories.
 
 ## Suggested command behavior reference
-- `/start`: greet user and explain available commands based on role.
-- `/add`: accept magnet link or torrent file and queue download.
+- `/start`: available to everyone; if caller is not whitelisted, respond with authentication guidance.
+- `/add`: accept magnet link or torrent file and queue download (whitelisted users only).
 - `/generateaccesstoken`: owner-only; create a single-use access token (30-minute TTL).
-- `/authenticate <token>`: redeem a valid token and whitelist caller by `user_id`.
-- `/removeuser <user_id>`: owner-only; remove user from whitelist by `user_id`.
+- `/authenticate <token>`: redeem a valid token and whitelist caller by `user_id`; hide this command from menu once user is whitelisted.
+- `/removeuser <user_id>`: owner-only; remove user from whitelist by `user_id`; show `/authenticate` in removed user menu again.
 - `/whitelist`: owner-only; list whitelisted users (`user_id`, username at authentication).
+- Command menu expectations: non-whitelisted users see `/start` + `/authenticate`; whitelisted users see `/start` + `/add`; owner sees whitelisted + admin commands.
 
 ## Out-of-scope unless requested
 - UI/front-end work.

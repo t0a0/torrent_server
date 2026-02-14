@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from .auth import AuthService
+from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_owner_user_id
 
 router = Router(name="phase1_handlers")
@@ -103,6 +104,11 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
 
     if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
         await message.answer("Authentication successful. You are now whitelisted.")
+        await setup_whitelisted_commands(
+            bot=message.bot,
+            user_id=user_id,
+            is_admin=auth_service.is_admin(user_id=user_id),
+        )
         owner_user_id = get_owner_user_id()
         if owner_user_id is not None:
             username_display = f"@{username}" if username else "<none>"
@@ -136,6 +142,7 @@ async def handle_removeuser(message: Message, command: CommandObject) -> None:
         return
 
     if auth_service.remove_user(target_user_id):
+        await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
         await message.answer(f"Removed user {target_user_id} from whitelist.")
         return
 

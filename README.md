@@ -40,14 +40,17 @@
 - `/authenticate <token>`: redeems token, whitelists caller by Telegram `user_id`, and stores username at authentication time.
 - `/whitelist` (admin only): lists whitelisted users.
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
-- `/start` and `/add`: available only for whitelisted users.
+- `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
+- `/add`: available only for whitelisted users.
 
 ## Telegram command menu
 
 The bot now configures Telegram command menus programmatically at startup:
 
-- Default users see: `/start`, `/add`, `/authenticate`.
-- Owner chat (using `BOT_OWNER_USER_ID`) gets an extended menu with admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
+- Non-whitelisted users see: `/start`, `/authenticate`.
+- Whitelisted users see: `/start`, `/add` (without `/authenticate`).
+- Owner chat (using `BOT_OWNER_USER_ID`) gets whitelisted commands plus admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
+- Menus are updated dynamically when a user authenticates or is removed from whitelist.
 
 This is applied automatically in `run_bot()` before polling starts.
 
