@@ -41,3 +41,13 @@
 - `/whitelist` (admin only): lists whitelisted users.
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
 - `/start` and `/add`: available only for whitelisted users.
+
+## Telegram command menu
+
+The bot now configures Telegram command menus programmatically at startup:
+
+- Default users see: `/start`, `/add`, `/authenticate`.
+- Owner chat (using `BOT_OWNER_USER_ID`) gets an extended menu with admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
+
+This is applied automatically in `run_bot()` before polling starts.
+
