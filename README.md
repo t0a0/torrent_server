@@ -161,11 +161,13 @@ This is applied automatically in `run_bot()` before polling starts.
 
 Security behavior:
 - The bot only serves `/myfolder` to whitelisted users.
-- The link signature is HMAC-SHA256 over `user_id:expires:nonce` using `DOWNLOAD_LINK_SECRET`.
+- The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
 - Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 1800 seconds).
 - The folder mapping is fixed to `downloads/<user_id>/`, so user `123` only gets links to `downloads/123/`.
 
 > Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
+
+NGINX now enforces both signature and expiry checks at request time, returning `403` for invalid signatures and `410` for expired links.
 
 ## Phase 2 torrent service primitives
 
