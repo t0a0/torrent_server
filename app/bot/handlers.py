@@ -127,8 +127,8 @@ async def handle_whitelist(message: Message) -> None:
     lines = ["Whitelisted users:"]
     for user in users:
         lines.append(
-            f"- user_id={user.user_id}, "
+            f"- user_id=`{user.user_id}`, "
             f"username_at_authentication={user.username_at_authentication}"
         )
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="Markdown")
