@@ -85,6 +85,33 @@ python3 -m app.bot.main
 > Note: at the moment `/add` is still a placeholder handler and does not yet call `TorrentService`. Phase 3 will wire bot messages/files into qBittorrent.
 
 
+
+## Docker Compose stack (bot + qBittorrent + HFS file-server)
+
+A ready-to-run `docker-compose.yml` is included for running the full stack with a dedicated **file-server container** that exposes downloaded files over HTTP.
+
+### Services
+
+- `bot`: Telegram bot process (`python -m app.bot.main`).
+- `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
+- `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
+
+All torrent payloads are stored in a shared Docker volume (`downloads`) mounted into both `qbittorrent` and `file-server`.
+
+### Start
+
+```bash
+cp .env.example .env
+# Edit .env and set TELEGRAM_BOT_TOKEN and BOT_OWNER_USER_ID
+docker compose up -d --build
+```
+
+Once torrents are downloaded, files become browseable via the file server at:
+
+```text
+http://localhost:8081/<telegram_user_id>/
+```
+
 ## Phase 1 command flow
 
 - `/generateaccesstoken` (admin only): creates a secure, single-use token valid for 30 minutes.
