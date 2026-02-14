@@ -1,5 +1,7 @@
 """Phase 1 bot command handlers."""
 
+from html import escape
+
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -126,9 +128,10 @@ async def handle_whitelist(message: Message) -> None:
 
     lines = ["Whitelisted users:"]
     for user in users:
+        username = user.username_at_authentication or "<none>"
         lines.append(
-            f"- user_id=`{user.user_id}`, "
-            f"username_at_authentication={user.username_at_authentication}"
+            f"- user_id=<code>{user.user_id}</code>, "
+            f"username_at_authentication={escape(username)}"
         )
 
-    await message.answer("\n".join(lines), parse_mode="Markdown")
+    await message.answer("\n".join(lines), parse_mode="HTML")
