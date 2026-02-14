@@ -9,9 +9,20 @@ from aiogram.types import Message
 from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_owner_user_id
+from app.download_links import DownloadLinkService
 
 router = Router(name="phase1_handlers")
 auth_service = AuthService(owner_user_id=get_owner_user_id())
+
+
+def _build_download_link_service() -> DownloadLinkService | None:
+    try:
+        return DownloadLinkService()
+    except ValueError:
+        return None
+
+
+download_link_service = _build_download_link_service()
 
 
 def _get_actor(message: Message) -> tuple[int, str | None] | None:
@@ -70,6 +81,28 @@ async def handle_add(message: Message) -> None:
     if await _require_whitelisted(message) is None:
         return
     await message.answer("/add is acknowledged. Torrent integration is pending in Phase 2.")
+
+
+@router.message(Command("myfolder"))
+async def handle_myfolder(message: Message) -> None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
+        return
+
+    if download_link_service is None or not download_link_service.is_configured():
+        await message.answer(
+            "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
+            "and DOWNLOAD_LINK_SECRET."
+        )
+        return
+
+    user_id, _ = actor
+    folder_link = download_link_service.build_user_folder_link(user_id=user_id)
+    await message.answer(
+        "Your personal download folder link (expires automatically):\n"
+        f"{folder_link}\n\n"
+        "This link is scoped to your Telegram user folder only."
+    )
 
 
 @router.message(Command("generateaccesstoken"))
