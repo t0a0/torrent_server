@@ -103,6 +103,17 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
 
     if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
         await message.answer("Authentication successful. You are now whitelisted.")
+        owner_user_id = get_owner_user_id()
+        if owner_user_id is not None and owner_user_id != user_id:
+            username_display = f"@{username}" if username else "<none>"
+            await message.bot.send_message(
+                chat_id=owner_user_id,
+                text=(
+                    "User authenticated successfully:\n"
+                    f"- user_id: {user_id}\n"
+                    f"- username: {username_display}"
+                ),
+            )
         return
 
     await message.answer("Invalid or expired token.")
