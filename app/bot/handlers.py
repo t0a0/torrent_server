@@ -100,8 +100,11 @@ async def handle_myfolder(message: Message) -> None:
     folder_link = download_link_service.build_user_folder_link(user_id=user_id)
     await message.answer(
         "Your personal download folder link (expires automatically):\n"
-        f"{folder_link}\n\n"
+        f'<a href="{escape(folder_link)}">Open your folder</a>\n\n'
         "This link is scoped to your Telegram user folder only."
+        " If the button does not open, copy this URL:\n"
+        f"<code>{escape(folder_link)}</code>",
+        parse_mode="HTML",
     )
 
 
