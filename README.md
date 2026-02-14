@@ -115,3 +115,5 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 - `start_download_from_magnet_url(user_id, magnet_url)`
 
 Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
+
+The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
