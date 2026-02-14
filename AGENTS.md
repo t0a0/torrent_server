@@ -57,6 +57,7 @@ When implementing features in this repository, prefer:
 - For first iteration, static URLs are acceptable for speed of delivery.
 - If/when tokenized URLs are introduced, they must be expiring and unguessable.
 - Restrict file serving to expected download directories.
+- For HTTPS deployments using cookie-assisted auth, remember to set auth cookies with the `Secure` attribute and enforce HTTP->HTTPS redirect (or block plain HTTP) at the edge.
 
 ## Suggested command behavior reference
 - `/start`: available to everyone; if caller is not whitelisted, respond with authentication guidance.
