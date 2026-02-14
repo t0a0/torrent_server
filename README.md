@@ -121,8 +121,22 @@ All torrent payloads are stored in a shared Docker volume (`downloads`) mounted 
 
 ```bash
 cp .env.example .env
-# Edit .env and set TELEGRAM_BOT_TOKEN and BOT_OWNER_USER_ID
+# Edit .env and set TELEGRAM_BOT_TOKEN, BOT_OWNER_USER_ID, HFS_BASE_URL, and DOWNLOAD_LINK_SECRET
 docker compose up -d --build
+```
+
+Recommended `.env` values for local macOS testing:
+
+```env
+HFS_BASE_URL=http://localhost:8081
+DOWNLOAD_LINK_SECRET=<long-random-secret>
+DOWNLOAD_LINK_TTL_SECONDS=1800
+```
+
+Optional secret generator:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 Once torrents are downloaded, files become browseable via the file server at:
@@ -130,6 +144,23 @@ Once torrents are downloaded, files become browseable via the file server at:
 ```text
 http://localhost:8081/<telegram_user_id>/
 ```
+
+### Local end-to-end smoke test for `/myfolder`
+
+1. Bring up the stack (`docker compose up -d --build`).
+2. In Telegram, authenticate a user (`/generateaccesstoken` then `/authenticate <token>`).
+3. Run `/myfolder` and copy the returned signed URL.
+4. Create a test file in that user's folder via the **write-capable** qBittorrent container:
+
+```bash
+docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/<telegram_user_id> && echo hello > /downloads/<telegram_user_id>/test.txt'
+```
+
+5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
+
+Notes:
+- `/srv/downloads` is inside the `file-server` container and mounted read-only there.
+- Use `/downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
 
 ## Phase 1 command flow
 
@@ -161,11 +192,13 @@ This is applied automatically in `run_bot()` before polling starts.
 
 Security behavior:
 - The bot only serves `/myfolder` to whitelisted users.
-- The link signature is HMAC-SHA256 over `user_id:expires:nonce` using `DOWNLOAD_LINK_SECRET`.
+- The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
 - Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 1800 seconds).
 - The folder mapping is fixed to `downloads/<user_id>/`, so user `123` only gets links to `downloads/123/`.
 
 > Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
+
+NGINX now enforces both signature and expiry checks at request time, returning `403` for invalid signatures and `410` for expired links.
 
 ## Phase 2 torrent service primitives
 
