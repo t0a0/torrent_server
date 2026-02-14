@@ -1,10 +1,8 @@
 """Phase 1 bot command handlers."""
 
-from html import escape
-
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
@@ -98,13 +96,16 @@ async def handle_myfolder(message: Message) -> None:
 
     user_id, _ = actor
     folder_link = download_link_service.build_user_folder_link(user_id=user_id)
+    folder_button = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Open folder", url=folder_link)]]
+    )
     await message.answer(
-        "Your personal download folder link (expires automatically):\n"
-        f"[Open your folder]({folder_link})\n\n"
+        "Your personal download folder link (expires automatically).\n"
+        "Use the button below to open your folder.\n\n"
         "This link is scoped to your Telegram user folder only."
         " If the button does not open, copy this URL:\n"
-        f"`{folder_link}`",
-        parse_mode="Markdown",
+        f"{folder_link}",
+        reply_markup=folder_button,
     )
 
 
