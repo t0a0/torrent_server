@@ -80,12 +80,16 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
         await message.answer("Cannot resolve caller identity.")
         return
 
+    user_id, username = actor
+    if auth_service.is_whitelisted(user_id):
+        await message.answer("You are already whitelisted. Auth token was not consumed.")
+        return
+
     token = (command.args or "").strip()
     if not token:
         await message.answer("Usage: /authenticate <token>")
         return
 
-    user_id, username = actor
     if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
         await message.answer("Authentication successful. You are now whitelisted.")
         return

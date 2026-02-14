@@ -29,13 +29,6 @@ class AuthService:
         self._whitelist: dict[int, WhitelistedUser] = {}
 
 
-    @staticmethod
-    def _normalize_username(username: str | None) -> str | None:
-        if not username:
-            return None
-        normalized = username.strip().lstrip("@").lower()
-        return normalized or None
-
     def _purge_expired_tokens(self) -> None:
         now = datetime.now(UTC)
         expired_tokens = [token for token, expires_at in self._tokens.items() if expires_at <= now]
@@ -65,7 +58,7 @@ class AuthService:
         self._tokens.pop(token, None)
         self._whitelist[user_id] = WhitelistedUser(
             user_id=user_id,
-            username_at_authentication=self._normalize_username(username),
+            username_at_authentication=username,
         )
         return True
 
