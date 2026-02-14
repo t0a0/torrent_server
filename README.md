@@ -34,6 +34,57 @@
    python3 -m app.bot.main
    ```
 
+
+## Running qBittorrent (required for Phase 2)
+
+The Telegram bot and qBittorrent run as separate processes. Start qBittorrent first, then start the bot.
+
+### Local macOS
+
+1. Install and open qBittorrent (GUI app).
+2. In qBittorrent settings, enable Web UI (HTTP API).
+3. Configure host/port/credentials (example: `127.0.0.1:8080`).
+4. Set matching values in `.env`:
+
+```env
+QBITTORRENT_URL=http://127.0.0.1:8080
+QBITTORRENT_USERNAME=<your_webui_username>
+QBITTORRENT_PASSWORD=<your_webui_password>
+DOWNLOADS_ROOT=downloads
+```
+
+### VPS (Docker example)
+
+```bash
+docker run -d \
+  --name qbittorrent \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e TZ=UTC \
+  -e WEBUI_PORT=8080 \
+  -p 8080:8080 \
+  -p 6881:6881 \
+  -p 6881:6881/udp \
+  -v /opt/qbit/config:/config \
+  -v /opt/qbit/downloads:/downloads \
+  --restart unless-stopped \
+  lscr.io/linuxserver/qbittorrent:latest
+```
+
+After container startup, open `http://<vps_ip>:8080`, configure credentials, and copy the same values into `.env`.
+
+### Start the full stack
+
+1. Start qBittorrent Web UI/API (local app or VPS container).
+2. Start the bot:
+
+```bash
+python3 -m app.bot.main
+```
+
+> Note: at the moment `/add` is still a placeholder handler and does not yet call `TorrentService`. Phase 3 will wire bot messages/files into qBittorrent.
+
+
 ## Phase 1 command flow
 
 - `/generateaccesstoken` (admin only): creates a secure, single-use token valid for 30 minutes.
