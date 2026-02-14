@@ -15,7 +15,7 @@
 3. Install dependencies:
    ```bash
    pip install --upgrade pip
-   pip install aiogram
+   pip install aiogram python-qbittorrent
    ```
 
 4. Create your local environment file:
@@ -54,3 +54,13 @@ The bot now configures Telegram command menus programmatically at startup:
 
 This is applied automatically in `run_bot()` before polling starts.
 
+
+
+## Phase 2 torrent service primitives
+
+A qBittorrent-backed service now lives in `app/torrent/service.py` with two methods:
+
+- `start_download_from_file_bytes(user_id, torrent_file_bytes)`
+- `start_download_from_magnet_url(user_id, magnet_url)`
+
+Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
