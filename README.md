@@ -27,6 +27,9 @@
    ```env
    TELEGRAM_BOT_TOKEN=your_real_bot_token
    BOT_OWNER_USER_ID=123456789
+HFS_BASE_URL=https://files.example.com
+DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
+DOWNLOAD_LINK_TTL_SECONDS=1800
    ```
 
 6. Start the bot:
@@ -93,19 +96,33 @@ python3 -m app.bot.main
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
 - `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
 - `/add`: available only for whitelisted users.
+- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `downloads/<user_id>/`.
 
 ## Telegram command menu
 
 The bot now configures Telegram command menus programmatically at startup:
 
 - Non-whitelisted users see: `/start`, `/authenticate`.
-- Whitelisted users see: `/start`, `/add` (without `/authenticate`).
+- Whitelisted users see: `/start`, `/add`, `/myfolder` (without `/authenticate`).
 - Owner chat (using `BOT_OWNER_USER_ID`) gets whitelisted commands plus admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
 - Menus are updated dynamically when a user authenticates or is removed from whitelist.
 
 This is applied automatically in `run_bot()` before polling starts.
 
 
+
+
+## HFS per-user folder links
+
+`/myfolder` generates an expiring signed URL for the caller only. The URL path is always `<HFS_BASE_URL>/<telegram_user_id>/` and includes `expires`, `nonce`, and `sig` query params.
+
+Security behavior:
+- The bot only serves `/myfolder` to whitelisted users.
+- The link signature is HMAC-SHA256 over `user_id:expires:nonce` using `DOWNLOAD_LINK_SECRET`.
+- Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 1800 seconds).
+- The folder mapping is fixed to `downloads/<user_id>/`, so user `123` only gets links to `downloads/123/`.
+
+> Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
 
 ## Phase 2 torrent service primitives
 

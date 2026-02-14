@@ -11,6 +11,7 @@ NON_WHITELISTED_COMMANDS = [
 WHITELISTED_COMMANDS = [
     BotCommand(command="start", description="Start bot"),
     BotCommand(command="add", description="Add torrent or magnet"),
+    BotCommand(command="myfolder", description="Get private download folder link"),
 ]
 
 ADMIN_COMMANDS = [
