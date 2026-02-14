@@ -121,7 +121,7 @@ All torrent payloads are stored in a shared Docker volume (`downloads`) mounted 
 
 ```bash
 cp .env.example .env
-# Edit .env and set TELEGRAM_BOT_TOKEN and BOT_OWNER_USER_ID
+# Edit .env and set all the variables
 docker compose up -d --build
 ```
 
@@ -130,6 +130,24 @@ Once torrents are downloaded, files become browseable via the file server at:
 ```text
 http://localhost:8081/<telegram_user_id>/
 ```
+
+### Local end-to-end smoke test for `/myfolder`
+
+1. Bring up the stack (`docker compose up -d --build`).
+2. In Telegram, authenticate a user (`/generateaccesstoken` then `/authenticate <token>`).
+3. Run `/myfolder` and copy the returned signed URL.
+4. Create a test file in that user's folder via the **write-capable** qBittorrent container:
+
+```bash
+docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/<telegram_user_id> && echo hello > /downloads/<telegram_user_id>/test.txt'
+```
+
+5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
+
+Notes:
+- `/srv/downloads` is inside the `file-server` container and mounted read-only there.
+- Use `/downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
+
 
 ## Phase 1 command flow
 
