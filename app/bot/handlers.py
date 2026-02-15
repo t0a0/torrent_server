@@ -115,8 +115,10 @@ async def handle_generate_access_token(message: Message) -> None:
 
     token = auth_service.generate_access_token()
     await message.answer(
-        "Access token (valid for 30 minutes, single-use):\n"
-        f"`{token}`",
+        "Here is your access token command. Click the code below to copy it, "
+        "then paste and send it to the bot.\n"
+        "Valid for 30 minutes and single-use:\n"
+        f"`/authenticate {token}`",
         parse_mode="Markdown",
     )
 
@@ -152,9 +154,10 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
                 chat_id=owner_user_id,
                 text=(
                     "User authenticated successfully:\n"
-                    f"- user_id: {user_id}\n"
-                    f"- username: {username_display}"
+                    f"- user_id: <code>{user_id}</code>\n"
+                    f"- username: {escape(username_display)}"
                 ),
+                parse_mode="HTML",
             )
         return
 
