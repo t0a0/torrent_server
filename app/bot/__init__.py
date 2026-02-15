@@ -6,15 +6,15 @@ from .handlers import router
 __all__ = ["create_bot", "create_dispatcher", "router", "run_bot"]
 
 
-def create_dispatcher():
-    """Create dispatcher and register all bot handlers."""
-    from .main import create_dispatcher as _create_dispatcher
+def __getattr__(name: str):
+    """Lazily expose main-module entrypoints without eager import side effects."""
+    if name in {"create_dispatcher", "run_bot"}:
+        from . import main as _main
 
-    return _create_dispatcher()
+        return getattr(_main, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-async def run_bot() -> None:
-    """Initialize and start the bot polling loop."""
-    from .main import run_bot as _run_bot
-
-    await _run_bot()
+def __dir__() -> list[str]:
+    """Include lazy exports in module introspection."""
+    return sorted(set(globals()) | {"create_dispatcher", "run_bot"})
