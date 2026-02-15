@@ -86,6 +86,23 @@ docker run -d \
 
 After container startup, open `http://<vps_ip>:8080`, configure credentials, and copy the same values into `.env`.
 
+### qBittorrent first-start credentials and bot login behavior
+
+If you use `lscr.io/linuxserver/qbittorrent`, first container boot prints a **temporary WebUI password** in logs.
+That temporary password is only for initial setup. After you sign in and set your own password in qBittorrent WebUI,
+store that final username/password in `.env` as:
+
+```env
+QBITTORRENT_USERNAME=admin
+QBITTORRENT_PASSWORD=<your_final_password>
+```
+
+Important notes:
+- The image does not provide a stable "set WebUI username/password via env" mechanism for this project.
+- The password you set in WebUI is persisted under the mounted `/config` volume, so you only do this once per config volume.
+- The bot authenticates lazily: it checks/login when a torrent API call is made. This avoids startup coupling to qBittorrent readiness.
+- Yes, qBittorrent API sessions can expire (cookie/session timeout or container restart). The bot handles this by re-authenticating when `LoginRequired` is raised.
+
 ### Start the full stack
 
 1. Start qBittorrent Web UI/API (local app or VPS container).

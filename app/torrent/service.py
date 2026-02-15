@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from qbittorrent import Client
+from qbittorrent.client import LoginRequired
 
 from .config import (
     get_downloads_root,
@@ -42,11 +43,12 @@ class TorrentService:
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
         self._downloads_root = downloads_root or get_downloads_root()
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
-
-        username = qbittorrent_username if qbittorrent_username is not None else get_qbittorrent_username()
-        password = qbittorrent_password if qbittorrent_password is not None else get_qbittorrent_password()
-        if username and password:
-            self._client.login(username=username, password=password)
+        self._username = (
+            qbittorrent_username if qbittorrent_username is not None else get_qbittorrent_username()
+        )
+        self._password = (
+            qbittorrent_password if qbittorrent_password is not None else get_qbittorrent_password()
+        )
 
         self._start_completion_cleanup_worker()
 
@@ -63,7 +65,7 @@ class TorrentService:
 
         save_path = self._build_user_download_path(user_id)
         file_buffer = BytesIO(torrent_file_bytes)
-        self._client.download_from_file(file_buffer, savepath=str(save_path))
+        self._call_with_auth(self._client.download_from_file, file_buffer, savepath=str(save_path))
 
     def start_download_from_magnet_url(self, user_id: int, magnet_url: str) -> None:
         """Queue magnet link for download into `downloads/<user_id>` directory."""
@@ -72,7 +74,26 @@ class TorrentService:
             raise ValueError("magnet_url must start with 'magnet:'")
 
         save_path = self._build_user_download_path(user_id)
-        self._client.download_from_link(magnet, savepath=str(save_path))
+        self._call_with_auth(self._client.download_from_link, magnet, savepath=str(save_path))
+
+    def _login(self) -> None:
+        """Login to qBittorrent Web UI using configured credentials."""
+        if not self._username or not self._password:
+            raise ValueError(
+                "qBittorrent requires authentication, but QBITTORRENT_USERNAME and "
+                "QBITTORRENT_PASSWORD are not fully configured."
+            )
+
+        self._client.login(username=self._username, password=self._password)
+
+    def _call_with_auth(self, method: Any, *args: Any, **kwargs: Any) -> Any:
+        """Call qBittorrent API method and re-authenticate if session expired."""
+        try:
+            return method(*args, **kwargs)
+        except LoginRequired:
+            self._logger.info("qBittorrent session expired. Re-authenticating.")
+            self._login()
+            return method(*args, **kwargs)
 
     def _start_completion_cleanup_worker(self) -> None:
         """Run one daemon background worker that removes completed torrents from queue.
@@ -94,7 +115,7 @@ class TorrentService:
 
     def _delete_completed_torrents(self) -> None:
         """Delete all completed torrents from queue and keep files on disk."""
-        torrents = self._client.torrents()
+        torrents = self._call_with_auth(self._client.torrents)
         if not isinstance(torrents, list):
             return
 
@@ -108,7 +129,7 @@ class TorrentService:
             if not isinstance(torrent_hash, str) or not torrent_hash:
                 continue
 
-            self._client.delete(hashes=torrent_hash, delete_files=False)
+            self._call_with_auth(self._client.delete, hashes=torrent_hash, delete_files=False)
             self._logger.info("Deleted completed torrent '%s' to stop seeding", torrent_hash)
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
