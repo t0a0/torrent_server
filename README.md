@@ -30,6 +30,7 @@
    HFS_BASE_URL=https://files.example.com
    DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
    DOWNLOAD_LINK_TTL_SECONDS=1800
+   AUTH_DB_PATH=auth.db
    ```
 
 6. Start the bot:
@@ -37,6 +38,15 @@
    python3 -m app.bot.main
    ```
 
+
+
+## Auth persistence (SQLite)
+
+Whitelist/auth data is persisted in an SQLite database instead of in-memory state.
+
+- The bot reads the database location from `AUTH_DB_PATH` (default: `auth.db`).
+- In Docker Compose, the bot stores this file at `/auth/auth.db` on a dedicated `auth_data` volume.
+- Recreating/updating the bot container keeps whitelist data as long as the `auth_data` volume is preserved.
 
 ## Running qBittorrent (required for Phase 2)
 
@@ -116,6 +126,8 @@ A ready-to-run `docker-compose.yml` is included for running the full stack with 
 - `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
 
 All torrent payloads are stored in a shared Docker volume (`downloads`) mounted into both `qbittorrent` and `file-server`.
+
+Auth/whitelist records are stored in a separate SQLite file on a dedicated Docker volume (`auth_data`) mounted into the `bot` service at `/auth/auth.db`.
 
 ### Start
 
