@@ -13,6 +13,13 @@ services:
     environment:
       DOWNLOADS_ROOT: /downloads
       QBITTORRENT_URL: http://qbittorrent:8080
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./app
+          target: /app/app
+        - action: rebuild
+          path: Dockerfile
     restart: unless-stopped
 
   qbittorrent:
