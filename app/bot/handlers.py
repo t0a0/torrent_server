@@ -177,9 +177,6 @@ async def handle_removeuser(message: Message, command: CommandObject) -> None:
         await message.answer("user_id must be an integer.")
         return
 
-    if auth_service.is_admin(target_user_id):
-        await message.answer("Owner user cannot be removed from whitelist.")
-        return
 
     if auth_service.remove_user(target_user_id):
         await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)

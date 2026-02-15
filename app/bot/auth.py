@@ -94,9 +94,6 @@ class AuthService:
         return True
 
     def remove_user(self, user_id: int) -> bool:
-        if self.is_admin(user_id):
-            return False
-
         with sqlite3.connect(self._db_path) as connection:
             cursor = connection.execute(
                 "DELETE FROM whitelisted_users WHERE user_id = ?",
