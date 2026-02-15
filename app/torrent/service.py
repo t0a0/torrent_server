@@ -20,6 +20,10 @@ from .config import (
 )
 
 
+class TorrentServiceError(RuntimeError):
+    """Raised when qBittorrent API operations fail."""
+
+
 class TorrentService:
     """Thin wrapper around python-qbittorrent with per-user save directories."""
 
@@ -58,6 +62,25 @@ class TorrentService:
         user_download_path.mkdir(parents=True, exist_ok=True)
         return user_download_path
 
+    def has_infohash(self, infohash: str) -> bool:
+        """Check whether a torrent hash already exists in qBittorrent list."""
+        try:
+            torrents = self._client.torrents()
+        except Exception as exc:
+            raise TorrentServiceError("Could not query qBittorrent torrents") from exc
+
+        if not isinstance(torrents, list):
+            return False
+
+        needle = infohash.lower()
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+            torrent_hash = torrent.get("hash")
+            if isinstance(torrent_hash, str) and torrent_hash.lower() == needle:
+                return True
+        return False
+
     def start_download_from_file_bytes(self, user_id: int, torrent_file_bytes: bytes) -> None:
         """Queue torrent file bytes for download into `downloads/<user_id>` directory."""
         if not torrent_file_bytes:
@@ -65,7 +88,10 @@ class TorrentService:
 
         save_path = self._build_user_download_path(user_id)
         file_buffer = BytesIO(torrent_file_bytes)
-        self._call_with_auth(self._client.download_from_file, file_buffer, savepath=str(save_path))
+        try:
+        	self._call_with_auth(self._client.download_from_file, file_buffer, savepath=str(save_path))
+        except Exception as exc:
+            raise TorrentServiceError("qBittorrent failed to accept torrent file") from exc
 
     def start_download_from_magnet_url(self, user_id: int, magnet_url: str) -> None:
         """Queue magnet link for download into `downloads/<user_id>` directory."""
@@ -74,7 +100,10 @@ class TorrentService:
             raise ValueError("magnet_url must start with 'magnet:'")
 
         save_path = self._build_user_download_path(user_id)
-        self._call_with_auth(self._client.download_from_link, magnet, savepath=str(save_path))
+        try:
+        	self._call_with_auth(self._client.download_from_link, magnet, savepath=str(save_path))
+        except Exception as exc:
+            raise TorrentServiceError("qBittorrent failed to accept magnet link") from exc
 
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""
