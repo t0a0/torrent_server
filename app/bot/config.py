@@ -6,7 +6,7 @@ from app.config import load_env_file
 
 _BOT_TOKEN_KEY = "TELEGRAM_BOT_TOKEN"
 _OWNER_USER_ID_KEY = "BOT_OWNER_USER_ID"
-
+_AUTH_DB_PATH_KEY = "AUTH_DB_PATH"
 
 
 def get_bot_token() -> str:
@@ -30,3 +30,7 @@ def get_owner_user_id() -> int | None:
     except ValueError as exc:
         raise ValueError(f"Invalid integer in {_OWNER_USER_ID_KEY}: {raw_user_id}") from exc
 
+def get_auth_db_path() -> str:
+    """Resolve path to auth SQLite database file."""
+    load_env_file()
+    return os.getenv(_AUTH_DB_PATH_KEY, "auth.db")

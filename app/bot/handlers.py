@@ -8,11 +8,14 @@ from aiogram.types import Message
 
 from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
-from .config import get_owner_user_id
+from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
 
 router = Router(name="phase1_handlers")
-auth_service = AuthService(owner_user_id=get_owner_user_id())
+auth_service = AuthService(
+    owner_user_id=get_owner_user_id(),
+    db_path=get_auth_db_path(),
+)
 
 
 def _build_download_link_service() -> DownloadLinkService | None:
@@ -172,6 +175,10 @@ async def handle_removeuser(message: Message, command: CommandObject) -> None:
         target_user_id = int(raw_user_id)
     except ValueError:
         await message.answer("user_id must be an integer.")
+        return
+
+    if auth_service.is_admin(target_user_id):
+        await message.answer("Owner user cannot be removed from whitelist.")
         return
 
     if auth_service.remove_user(target_user_id):

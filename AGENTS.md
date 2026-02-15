@@ -8,6 +8,7 @@ Primary stack and constraints:
 - Telegram bot API via `aiogram`
 - Torrent control via `python-qbittorrent`
 - Docker for build and deployment
+- SQLite for auth/whitelist persistence
 
 ## Working mode defaults
 - Unless explicitly asked to implement/code, operate in **Q/A mode** (no file modifications).
