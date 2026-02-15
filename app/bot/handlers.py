@@ -115,7 +115,9 @@ async def handle_generate_access_token(message: Message) -> None:
 
     token = auth_service.generate_access_token()
     await message.answer(
-        "Access token command (valid for 30 minutes, single-use):\n"
+        "Forward this message to the user who needs access.\n"
+        "They can tap the command below to copy it to their clipboard, then paste and send it to the bot.\n"
+        "Token command (valid for 30 minutes, single-use):\n"
         f"`/authenticate {token}`",
         parse_mode="Markdown",
     )
