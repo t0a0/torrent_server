@@ -147,8 +147,19 @@ docker compose watch bot
 
 Notes:
 - Keep `docker compose up -d` running in another terminal.
+- `docker compose up` **alone** does not enable live syncing/restart behavior.
+- You generally do **not** need to toggle anything in Docker Desktop settings for this project-specific workflow.
 - Changes under `./app` are synced with `sync+restart` behavior.
 - Changes to `Dockerfile` trigger a rebuild for `bot`.
+
+If hot reload seems broken, first confirm the watch process is actually running:
+
+```bash
+docker compose watch bot
+docker compose logs -f bot
+```
+
+Then edit a file under `./app` and verify the bot service restarts.
 
 Once torrents are downloaded, files become browseable via the file server at:
 
