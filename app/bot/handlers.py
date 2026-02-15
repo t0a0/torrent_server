@@ -152,9 +152,10 @@ async def handle_authenticate(message: Message, command: CommandObject) -> None:
                 chat_id=owner_user_id,
                 text=(
                     "User authenticated successfully:\n"
-                    f"- user_id: {user_id}\n"
-                    f"- username: {username_display}"
+                    f"- user_id: <code>{user_id}</code>\n"
+                    f"- username: {escape(username_display)}"
                 ),
+                parse_mode="HTML",
             )
         return
 
