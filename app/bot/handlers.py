@@ -115,8 +115,8 @@ async def handle_generate_access_token(message: Message) -> None:
 
     token = auth_service.generate_access_token()
     await message.answer(
-        "Access token (valid for 30 minutes, single-use):\n"
-        f"`{token}`",
+        "Access token command (valid for 30 minutes, single-use):\n"
+        f"`/authenticate {token}`",
         parse_mode="Markdown",
     )
 
