@@ -125,6 +125,19 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+### Faster local iteration (no rebuild on every code change)
+
+For day-to-day bot development, use Docker Compose Watch to sync `./app` changes into the running `bot` container and restart only that service process:
+
+```bash
+docker compose watch bot
+```
+
+Notes:
+- Keep `docker compose up -d` running in another terminal.
+- Changes under `./app` are synced with `sync+restart` behavior.
+- Changes to `Dockerfile` trigger a rebuild for `bot`.
+
 Once torrents are downloaded, files become browseable via the file server at:
 
 ```text
