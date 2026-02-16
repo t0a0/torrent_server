@@ -64,6 +64,7 @@ QBITTORRENT_URL=http://127.0.0.1:8080
 QBITTORRENT_USERNAME=<your_webui_username>
 QBITTORRENT_PASSWORD=<your_webui_password>
 DOWNLOADS_ROOT=downloads
+QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
 ### VPS (Docker example)
@@ -262,4 +263,6 @@ The service also runs a background cleanup loop that automatically removes compl
 If qBittorrent reports a permission error under `/downloads/<telegram_user_id>/...`, it usually means that folder was created by a different container user (for example, the bot as root) and is not writable by qBittorrent.
 
 Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
+
+Global upload limit is configured via `QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC` (default `1048576`, i.e. 1 MiB/s). On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
 
