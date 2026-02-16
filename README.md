@@ -112,9 +112,6 @@ Important notes:
 python3 -m app.bot.main
 ```
 
-> Note: at the moment `/add` is still a placeholder handler and does not yet call `TorrentService`. Phase 3 will wire bot messages/files into qBittorrent.
-
-
 
 For Docker Compose deployments, set:
 
@@ -209,7 +206,7 @@ Notes:
 - `/whitelist` (admin only): lists whitelisted users.
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
 - `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
-- `/add`: available only for whitelisted users.
+- `/queuedownload`: available only for whitelisted users.
 - `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `downloads/<user_id>/`.
 
 ## Telegram command menu
@@ -217,7 +214,7 @@ Notes:
 The bot now configures Telegram command menus programmatically at startup:
 
 - Non-whitelisted users see: `/start`, `/authenticate`.
-- Whitelisted users see: `/start`, `/add`, `/myfolder` (without `/authenticate`).
+- Whitelisted users see: `/start`, `/queuedownload`, `/myfolder` (without `/authenticate`).
 - Owner chat (using `BOT_OWNER_USER_ID`) gets whitelisted commands plus admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
 - Menus are updated dynamically when a user authenticates or is removed from whitelist.
 
@@ -250,3 +247,19 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
 
 The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
+
+
+## Phase 3 `/queuedownload` validation and queue flow
+
+- `/queuedownload` now starts an input session and prompts user to paste a magnet URL or upload a `.torrent` file.
+- Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
+- Valid payloads are queued via qBittorrent into `DOWNLOADS_ROOT/<telegram_user_id>/`.
+- Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
+- Uploaded `.torrent` files are stored in a temporary path (`TORRENT_INPUT_TMP_DIR`) and always removed after processing.
+
+### Troubleshooting: `file_open ... Permission denied` in qBittorrent
+
+If qBittorrent reports a permission error under `/downloads/<telegram_user_id>/...`, it usually means that folder was created by a different container user (for example, the bot as root) and is not writable by qBittorrent.
+
+Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
+
