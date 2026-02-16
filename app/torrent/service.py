@@ -17,6 +17,7 @@ from .config import (
     get_qbittorrent_password,
     get_qbittorrent_url,
     get_qbittorrent_username,
+    get_qbit_global_upload_limit_bytes_per_sec,
 )
 
 
@@ -50,7 +51,23 @@ class TorrentService:
             qbittorrent_password if qbittorrent_password is not None else get_qbittorrent_password()
         )
 
+        self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
+
+    def _apply_global_upload_limit(self) -> None:
+        """Apply qBittorrent global upload speed limit from environment config."""
+        upload_limit_bytes_per_sec = get_qbit_global_upload_limit_bytes_per_sec()
+        if upload_limit_bytes_per_sec < 0:
+            raise ValueError("QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC must be >= 0")
+
+        self._call_with_auth(
+            self._client.set_preferences,
+            up_limit=upload_limit_bytes_per_sec,
+        )
+        self._logger.info(
+            "Applied qBittorrent global upload limit: %s bytes/sec",
+            upload_limit_bytes_per_sec,
+        )
 
     def _build_user_download_path(self, user_id: int) -> Path:
         """Return `downloads/<user_id>` path and avoid creating root-owned directories.

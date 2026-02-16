@@ -21,8 +21,7 @@ _MAX_AGGREGATE_SIZE_BYTES_KEY = "MAX_TORRENT_AGGREGATE_SIZE_BYTES"
 _QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
-
-
+_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY = "QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC"
 
 def get_qbittorrent_url() -> str:
     """Resolve qBittorrent Web UI URL from environment."""
@@ -108,3 +107,7 @@ def get_torrent_input_tmp_dir() -> Path:
 
 def get_qbit_api_timeout_seconds() -> int:
     return _get_int_env(_QBIT_API_TIMEOUT_SECONDS_KEY, 15)
+
+
+def get_qbit_global_upload_limit_bytes_per_sec() -> int:
+    return _get_int_env(_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY, 1024 * 1024)
