@@ -18,7 +18,7 @@ from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
 from app.torrent import TorrentService
 from app.torrent.config import (
-    get_add_rate_limit_per_min,
+    get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
     get_max_magnet_url_length,
     get_max_torrent_aggregate_size_bytes,
@@ -31,7 +31,7 @@ from app.torrent.config import (
     get_qbit_api_timeout_seconds,
     get_torrent_input_tmp_dir,
 )
-from app.torrent.policy import AddPolicyService
+from app.torrent.policy import QueueDownloadPolicyService
 from app.torrent.validators import ValidationError, validate_magnet_url, validate_torrent_file_bytes
 
 router = Router(name="phase3_handlers")
@@ -42,7 +42,7 @@ auth_service = AuthService(
 )
 
 
-class _AddSessionState:
+class _QueueDownloadSessionState:
     def __init__(self) -> None:
         self._waiting_users: set[int] = set()
 
@@ -56,8 +56,8 @@ class _AddSessionState:
         self._waiting_users.discard(user_id)
 
 
-add_session_state = _AddSessionState()
-add_policy = AddPolicyService(adds_per_minute=get_add_rate_limit_per_min())
+queue_download_session_state = _QueueDownloadSessionState()
+queue_download_policy = QueueDownloadPolicyService(queue_downloads_per_minute=get_queue_download_rate_limit_per_min())
 max_torrent_bytes_hard = get_max_torrent_bytes_hard()
 max_torrent_bytes_warn = get_max_torrent_bytes_warn()
 qbit_timeout_seconds = get_qbit_api_timeout_seconds()
@@ -137,17 +137,17 @@ async def handle_start(message: Message) -> None:
 
 
 @router.message(Command("queuedownload"))
-async def handle_add(message: Message) -> None:
+async def handle_queuedownload(message: Message) -> None:
     actor = await _require_whitelisted(message)
     if actor is None:
         return
 
     user_id, _ = actor
-    if not add_policy.enforce_rate_limit(user_id):
+    if not queue_download_policy.enforce_rate_limit(user_id):
         await message.answer("Too many queue requests right now. Please wait a minute and try again.")
         return
 
-    add_session_state.begin_waiting(user_id)
+    queue_download_session_state.begin_waiting(user_id)
     await message.answer("Paste a magnet URL or upload a .torrent file.")
 
 
@@ -276,49 +276,49 @@ async def handle_whitelist(message: Message) -> None:
 
 
 @router.message()
-async def handle_add_input(message: Message) -> None:
+async def handle_queue_download_input(message: Message) -> None:
     actor = _get_actor(message)
     if actor is None:
         return
 
     user_id, _ = actor
-    if not add_session_state.is_waiting(user_id):
+    if not queue_download_session_state.is_waiting(user_id):
         return
 
     if not auth_service.is_whitelisted(user_id):
-        add_session_state.clear_waiting(user_id)
+        queue_download_session_state.clear_waiting(user_id)
         await message.answer("You are not authenticated. Use /authenticate <token>.")
         return
 
     if torrent_service is None:
-        add_session_state.clear_waiting(user_id)
+        queue_download_session_state.clear_waiting(user_id)
         await message.answer("Torrent service is currently unavailable. Please contact admin.")
         return
 
     if message.document is not None:
-        await _process_torrent_upload(message=message, user_id=user_id)
+        await _process_queue_download_torrent_upload(message=message, user_id=user_id)
         return
 
     text = (message.text or "").strip()
     if text:
-        await _process_magnet_input(message=message, user_id=user_id, text=text)
+        await _process_queue_download_magnet_input(message=message, user_id=user_id, text=text)
         return
 
     await message.answer("Please paste a magnet URL or upload a .torrent file.")
 
 
-async def _process_torrent_upload(message: Message, user_id: int) -> None:
+async def _process_queue_download_torrent_upload(message: Message, user_id: int) -> None:
     assert message.document is not None
     document = message.document
     original_name = document.file_name or "upload.torrent"
     if not original_name.lower().endswith(".torrent"):
         await message.answer("Please upload a .torrent file.")
-        add_policy.mark_rejection("torrent_extension")
+        queue_download_policy.mark_rejection("torrent_extension")
         return
 
     if document.file_size is not None and document.file_size > max_torrent_bytes_hard:
         await message.answer("Torrent file is too large.")
-        add_policy.mark_rejection("torrent_size_hard")
+        queue_download_policy.mark_rejection("torrent_size_hard")
         logger.info("/queuedownload rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
         return
 
@@ -331,7 +331,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
         torrent_bytes = temp_path.read_bytes()
 
         if len(torrent_bytes) > max_torrent_bytes_hard:
-            add_policy.mark_rejection("torrent_size_hard")
+            queue_download_policy.mark_rejection("torrent_size_hard")
             await message.answer("Torrent file is too large.")
             reason = "torrent_size_hard"
             return
@@ -358,21 +358,21 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
             ),
             timeout=qbit_timeout_seconds,
         )
-        add_policy.mark_qbit_latency(time.monotonic() - started_at)
-        add_policy.mark_accepted()
-        add_session_state.clear_waiting(user_id)
+        queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
+        queue_download_policy.mark_accepted()
+        queue_download_session_state.clear_waiting(user_id)
         await message.answer("Torrent accepted and queued for download.")
     except ValidationError as exc:
         reason = exc.code
-        add_policy.mark_rejection(exc.code)
+        queue_download_policy.mark_rejection(exc.code)
         await message.answer(exc.user_message)
     except TimeoutError:
         reason = "qbit_timeout"
-        add_policy.mark_qbit_error()
+        queue_download_policy.mark_qbit_error()
         await message.answer("Torrent service timed out while queueing this torrent. Please retry.")
     except Exception as exc:
         reason = _map_qbit_error(exc)
-        add_policy.mark_qbit_error()
+        queue_download_policy.mark_qbit_error()
         await message.answer(_map_qbit_user_message(reason))
     finally:
         logger.info(
@@ -385,7 +385,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-async def _process_magnet_input(message: Message, user_id: int, text: str) -> None:
+async def _process_queue_download_magnet_input(message: Message, user_id: int, text: str) -> None:
     infohash: str | None = None
     reason = "accepted"
     try:
@@ -412,21 +412,21 @@ async def _process_magnet_input(message: Message, user_id: int, text: str) -> No
             ),
             timeout=qbit_timeout_seconds,
         )
-        add_policy.mark_qbit_latency(time.monotonic() - started_at)
-        add_policy.mark_accepted()
-        add_session_state.clear_waiting(user_id)
+        queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
+        queue_download_policy.mark_accepted()
+        queue_download_session_state.clear_waiting(user_id)
         await message.answer("Magnet accepted and queued for download.")
     except ValidationError as exc:
         reason = exc.code
-        add_policy.mark_rejection(exc.code)
+        queue_download_policy.mark_rejection(exc.code)
         await message.answer(exc.user_message)
     except TimeoutError:
         reason = "qbit_timeout"
-        add_policy.mark_qbit_error()
+        queue_download_policy.mark_qbit_error()
         await message.answer("Torrent service timed out while queueing this magnet. Please retry.")
     except Exception as exc:
         reason = _map_qbit_error(exc)
-        add_policy.mark_qbit_error()
+        queue_download_policy.mark_qbit_error()
         await message.answer(_map_qbit_user_message(reason))
     finally:
         logger.info(

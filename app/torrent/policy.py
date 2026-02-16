@@ -7,20 +7,20 @@ import threading
 import time
 
 
-class AddPolicyService:
-    def __init__(self, adds_per_minute: int) -> None:
-        self._adds_per_minute = max(1, adds_per_minute)
-        self._recent_adds_by_user: dict[int, deque[float]] = {}
+class QueueDownloadPolicyService:
+    def __init__(self, queue_downloads_per_minute: int) -> None:
+        self._queue_downloads_per_minute = max(1, queue_downloads_per_minute)
+        self._recent_queue_downloads_by_user: dict[int, deque[float]] = {}
         self._metrics = Counter()
         self._lock = threading.Lock()
 
     def enforce_rate_limit(self, user_id: int) -> bool:
         now = time.monotonic()
         with self._lock:
-            window = self._recent_adds_by_user.setdefault(user_id, deque())
+            window = self._recent_queue_downloads_by_user.setdefault(user_id, deque())
             while window and now - window[0] > 60:
                 window.popleft()
-            if len(window) >= self._adds_per_minute:
+            if len(window) >= self._queue_downloads_per_minute:
                 self._metrics["rejected:rate_limit"] += 1
                 return False
             window.append(now)

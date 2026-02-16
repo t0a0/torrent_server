@@ -18,7 +18,7 @@ _MAX_TORRENT_NAME_LENGTH_KEY = "MAX_TORRENT_NAME_LENGTH"
 _MAX_TRACKER_URL_LENGTH_KEY = "MAX_TRACKER_URL_LENGTH"
 _MAX_PATH_SEGMENT_LENGTH_KEY = "MAX_TORRENT_PATH_SEGMENT_LENGTH"
 _MAX_AGGREGATE_SIZE_BYTES_KEY = "MAX_TORRENT_AGGREGATE_SIZE_BYTES"
-_ADD_RATE_LIMIT_PER_MIN_KEY = "ADD_RATE_LIMIT_PER_MIN"
+_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
 
@@ -96,8 +96,12 @@ def get_max_torrent_aggregate_size_bytes() -> int:
     return _get_int_env(_MAX_AGGREGATE_SIZE_BYTES_KEY, 0)
 
 
-def get_add_rate_limit_per_min() -> int:
-    return _get_int_env(_ADD_RATE_LIMIT_PER_MIN_KEY, 10)
+def get_queue_download_rate_limit_per_min() -> int:
+    legacy_key = "ADD_RATE_LIMIT_PER_MIN"
+    load_env_file()
+    if os.getenv(legacy_key) is not None and os.getenv(_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY) is None:
+        return _get_int_env(legacy_key, 10)
+    return _get_int_env(_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY, 10)
 
 
 def get_torrent_input_tmp_dir() -> Path:
