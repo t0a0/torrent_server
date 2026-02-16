@@ -112,9 +112,6 @@ Important notes:
 python3 -m app.bot.main
 ```
 
-> Note: at the moment `/add` is still a placeholder handler and does not yet call `TorrentService`. Phase 3 will wire bot messages/files into qBittorrent.
-
-
 
 For Docker Compose deployments, set:
 
@@ -250,3 +247,12 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
 
 The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
+
+
+## Phase 3 `/add` validation and queue flow
+
+- `/add` now starts an input session and prompts user to paste a magnet URL or upload a `.torrent` file.
+- Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
+- Valid payloads are queued via qBittorrent into `DOWNLOADS_ROOT/<telegram_user_id>/`.
+- Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
+- Uploaded `.torrent` files are stored in a temporary path (`TORRENT_INPUT_TMP_DIR`) and always removed after processing.

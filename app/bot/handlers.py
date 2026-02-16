@@ -1,6 +1,12 @@
-"""Phase 1 bot command handlers."""
+"""Phase 3 bot command handlers."""
 
+from __future__ import annotations
+
+import asyncio
 from html import escape
+import logging
+import secrets
+import time
 
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
@@ -10,12 +16,54 @@ from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
+from app.torrent import TorrentService
+from app.torrent.config import (
+    get_add_rate_limit_per_min,
+    get_max_magnet_trackers,
+    get_max_magnet_url_length,
+    get_max_torrent_aggregate_size_bytes,
+    get_max_torrent_bytes_hard,
+    get_max_torrent_bytes_warn,
+    get_max_torrent_file_count,
+    get_max_torrent_name_length,
+    get_max_torrent_path_segment_length,
+    get_max_tracker_url_length,
+    get_qbit_api_timeout_seconds,
+    get_torrent_input_tmp_dir,
+)
+from app.torrent.policy import AddPolicyService
+from app.torrent.validators import ValidationError, validate_magnet_url, validate_torrent_file_bytes
 
-router = Router(name="phase1_handlers")
+router = Router(name="phase3_handlers")
+logger = logging.getLogger(__name__)
 auth_service = AuthService(
     owner_user_id=get_owner_user_id(),
     db_path=get_auth_db_path(),
 )
+
+
+class _AddSessionState:
+    def __init__(self) -> None:
+        self._waiting_users: set[int] = set()
+
+    def begin_waiting(self, user_id: int) -> None:
+        self._waiting_users.add(user_id)
+
+    def is_waiting(self, user_id: int) -> bool:
+        return user_id in self._waiting_users
+
+    def clear_waiting(self, user_id: int) -> None:
+        self._waiting_users.discard(user_id)
+
+
+add_session_state = _AddSessionState()
+add_policy = AddPolicyService(adds_per_minute=get_add_rate_limit_per_min())
+max_torrent_bytes_hard = get_max_torrent_bytes_hard()
+max_torrent_bytes_warn = get_max_torrent_bytes_warn()
+qbit_timeout_seconds = get_qbit_api_timeout_seconds()
+tmp_input_dir = get_torrent_input_tmp_dir()
+tmp_input_dir.mkdir(parents=True, exist_ok=True)
+
 
 
 def _build_download_link_service() -> DownloadLinkService | None:
@@ -25,7 +73,16 @@ def _build_download_link_service() -> DownloadLinkService | None:
         return None
 
 
+def _build_torrent_service() -> TorrentService | None:
+    try:
+        return TorrentService()
+    except ValueError:
+        logger.exception("Failed to initialize TorrentService")
+        return None
+
+
 download_link_service = _build_download_link_service()
+torrent_service = _build_torrent_service()
 
 
 def _get_actor(message: Message) -> tuple[int, str | None] | None:
@@ -81,9 +138,17 @@ async def handle_start(message: Message) -> None:
 
 @router.message(Command("add"))
 async def handle_add(message: Message) -> None:
-    if await _require_whitelisted(message) is None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
         return
-    await message.answer("/add is acknowledged. Torrent integration is pending in Phase 2.")
+
+    user_id, _ = actor
+    if not add_policy.enforce_rate_limit(user_id):
+        await message.answer("Too many add requests right now. Please wait a minute and try again.")
+        return
+
+    add_session_state.begin_waiting(user_id)
+    await message.answer("Paste a magnet URL or upload a .torrent file.")
 
 
 @router.message(Command("myfolder"))
@@ -180,7 +245,6 @@ async def handle_removeuser(message: Message, command: CommandObject) -> None:
         await message.answer("user_id must be an integer.")
         return
 
-
     if auth_service.remove_user(target_user_id):
         await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
         await message.answer(f"Removed user {target_user_id} from whitelist.")
@@ -209,3 +273,202 @@ async def handle_whitelist(message: Message) -> None:
         )
 
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message()
+async def handle_add_input(message: Message) -> None:
+    actor = _get_actor(message)
+    if actor is None:
+        return
+
+    user_id, _ = actor
+    if not add_session_state.is_waiting(user_id):
+        return
+
+    if not auth_service.is_whitelisted(user_id):
+        add_session_state.clear_waiting(user_id)
+        await message.answer("You are not authenticated. Use /authenticate <token>.")
+        return
+
+    if torrent_service is None:
+        add_session_state.clear_waiting(user_id)
+        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        return
+
+    if message.document is not None:
+        await _process_torrent_upload(message=message, user_id=user_id)
+        return
+
+    text = (message.text or "").strip()
+    if text:
+        await _process_magnet_input(message=message, user_id=user_id, text=text)
+        return
+
+    await message.answer("Please paste a magnet URL or upload a .torrent file.")
+
+
+async def _process_torrent_upload(message: Message, user_id: int) -> None:
+    assert message.document is not None
+    document = message.document
+    original_name = document.file_name or "upload.torrent"
+    if not original_name.lower().endswith(".torrent"):
+        await message.answer("Please upload a .torrent file.")
+        add_policy.mark_rejection("torrent_extension")
+        return
+
+    if document.file_size is not None and document.file_size > max_torrent_bytes_hard:
+        await message.answer("Torrent file is too large.")
+        add_policy.mark_rejection("torrent_size_hard")
+        logger.info("/add rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
+        return
+
+    temp_path = tmp_input_dir / f"{secrets.token_hex(16)}.torrent"
+    infohash: str | None = None
+    reason = "accepted"
+    try:
+        tg_file = await message.bot.get_file(document.file_id)
+        await message.bot.download_file(tg_file.file_path, destination=temp_path)
+        torrent_bytes = temp_path.read_bytes()
+
+        if len(torrent_bytes) > max_torrent_bytes_hard:
+            add_policy.mark_rejection("torrent_size_hard")
+            await message.answer("Torrent file is too large.")
+            reason = "torrent_size_hard"
+            return
+
+        if len(torrent_bytes) > max_torrent_bytes_warn:
+            logger.warning("/add large torrent metadata user_id=%s size=%s", user_id, len(torrent_bytes))
+
+        validation = validate_torrent_file_bytes(
+            torrent_bytes=torrent_bytes,
+            max_torrent_name_length=get_max_torrent_name_length(),
+            max_tracker_url_length=get_max_tracker_url_length(),
+            max_path_segment_length=get_max_torrent_path_segment_length(),
+            max_torrent_file_count=get_max_torrent_file_count(),
+            max_torrent_aggregate_size_bytes=get_max_torrent_aggregate_size_bytes(),
+        )
+        infohash = validation.infohash
+
+        if add_policy.is_duplicate(infohash) or torrent_service.is_infohash_present(infohash):
+            add_policy.mark_rejection("duplicate")
+            reason = "duplicate"
+            await message.answer("This torrent is already queued or processed.")
+            return
+
+        started_at = time.monotonic()
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                torrent_service.start_download_from_file_bytes,
+                user_id,
+                torrent_bytes,
+            ),
+            timeout=qbit_timeout_seconds,
+        )
+        add_policy.mark_qbit_latency(time.monotonic() - started_at)
+        add_policy.mark_accepted(infohash)
+        add_session_state.clear_waiting(user_id)
+        await message.answer("Torrent accepted and queued for download.")
+    except ValidationError as exc:
+        reason = exc.code
+        add_policy.mark_rejection(exc.code)
+        await message.answer(exc.user_message)
+    except TimeoutError:
+        reason = "qbit_timeout"
+        add_policy.mark_qbit_error()
+        await message.answer("Torrent service timed out while queueing this torrent. Please retry.")
+    except Exception as exc:
+        reason = _map_qbit_error(exc)
+        add_policy.mark_qbit_error()
+        await message.answer(_map_qbit_user_message(reason))
+    finally:
+        logger.info(
+            "/add torrent upload decision user_id=%s size=%s infohash=%s reason=%s",
+            user_id,
+            document.file_size,
+            infohash,
+            reason,
+        )
+        temp_path.unlink(missing_ok=True)
+
+
+async def _process_magnet_input(message: Message, user_id: int, text: str) -> None:
+    infohash: str | None = None
+    reason = "accepted"
+    try:
+        validation = validate_magnet_url(
+            magnet_url=text,
+            max_url_length=get_max_magnet_url_length(),
+            max_trackers=get_max_magnet_trackers(),
+            max_param_length=get_max_tracker_url_length(),
+            require_source_param=True,
+        )
+        infohash = validation.infohash
+
+        if add_policy.is_duplicate(infohash) or torrent_service is not None and torrent_service.is_infohash_present(infohash):
+            add_policy.mark_rejection("duplicate")
+            reason = "duplicate"
+            await message.answer("This magnet is already queued or processed.")
+            return
+
+        if torrent_service is None:
+            reason = "service_unavailable"
+            await message.answer("Torrent service is currently unavailable. Please contact admin.")
+            return
+
+        started_at = time.monotonic()
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                torrent_service.start_download_from_magnet_url,
+                user_id,
+                validation.normalized_url,
+            ),
+            timeout=qbit_timeout_seconds,
+        )
+        add_policy.mark_qbit_latency(time.monotonic() - started_at)
+        add_policy.mark_accepted(infohash)
+        add_session_state.clear_waiting(user_id)
+        await message.answer("Magnet accepted and queued for download.")
+    except ValidationError as exc:
+        reason = exc.code
+        add_policy.mark_rejection(exc.code)
+        await message.answer(exc.user_message)
+    except TimeoutError:
+        reason = "qbit_timeout"
+        add_policy.mark_qbit_error()
+        await message.answer("Torrent service timed out while queueing this magnet. Please retry.")
+    except Exception as exc:
+        reason = _map_qbit_error(exc)
+        add_policy.mark_qbit_error()
+        await message.answer(_map_qbit_user_message(reason))
+    finally:
+        logger.info(
+            "/add magnet decision user_id=%s size=%s infohash=%s reason=%s",
+            user_id,
+            len(text),
+            infohash,
+            reason,
+        )
+
+
+def _map_qbit_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "duplicate" in message or "already" in message:
+        return "duplicate"
+    if "invalid" in message:
+        return "invalid"
+    if "timed out" in message or "timeout" in message:
+        return "qbit_timeout"
+    if "connection" in message or "refused" in message:
+        return "qbit_unavailable"
+    logger.exception("Unexpected qBittorrent error", exc_info=exc)
+    return "qbit_unavailable"
+
+
+def _map_qbit_user_message(reason: str) -> str:
+    if reason == "duplicate":
+        return "This torrent is already queued."
+    if reason == "invalid":
+        return "qBittorrent rejected this torrent input as invalid."
+    if reason == "qbit_timeout":
+        return "qBittorrent timed out. Please retry in a moment."
+    return "Torrent backend is currently unavailable. Please retry later."
