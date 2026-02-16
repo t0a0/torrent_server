@@ -64,7 +64,6 @@ QBITTORRENT_URL=http://127.0.0.1:8080
 QBITTORRENT_USERNAME=<your_webui_username>
 QBITTORRENT_PASSWORD=<your_webui_password>
 DOWNLOADS_ROOT=downloads
-FINISHED_DOWNLOADS_ROOT=finished_downloads
 QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
@@ -119,7 +118,6 @@ For Docker Compose deployments, set:
 
 ```env
 DOWNLOADS_ROOT=/downloads
-FINISHED_DOWNLOADS_ROOT=/finished_downloads
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -140,9 +138,9 @@ A ready-to-run `docker-compose.yml` is included for running the full stack with 
 
 - `bot`: Telegram bot process (`python -m app.bot.main`).
 - `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
-- `file-server`: NGINX-based HFS (HTTP file server) exposing the shared finished-downloads volume (`http://localhost:8081`).
+- `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
 
-Torrent payloads are first written to a shared Docker volume (`downloads`) by qBittorrent, then moved to a separate shared Docker volume (`finished_downloads`) that is mounted read-only into `file-server`.
+All torrent payloads are stored in a shared Docker volume (`downloads`) mounted into both `qbittorrent` and `file-server`.
 
 Auth/whitelist records are stored in a separate SQLite file on a dedicated Docker volume (`auth_data`) mounted into the `bot` service at `/auth/auth.db`.
 
@@ -189,17 +187,17 @@ http://localhost:8081/<telegram_user_id>/
 1. Bring up the stack (`docker compose up -d --build`).
 2. In Telegram, authenticate a user (`/generateaccesstoken` then `/authenticate <token>`).
 3. Run `/myfolder` and copy the returned signed URL.
-4. Create a test file in that user's finished folder via the **write-capable** bot container:
+4. Create a test file in that user's folder via the **write-capable** qBittorrent container:
 
 ```bash
-docker compose exec bot sh -lc 'mkdir -p /finished_downloads/<telegram_user_id> && echo hello > /finished_downloads/<telegram_user_id>/test.txt'
+docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/<telegram_user_id> && echo hello > /downloads/<telegram_user_id>/test.txt'
 ```
 
 5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
 
 Notes:
-- `/srv/downloads` is inside the `file-server` container and is backed by the `finished_downloads` volume mounted read-only there.
-- Use `/finished_downloads` in `bot` for manual `/myfolder` smoke-test writes.
+- `/srv/downloads` is inside the `file-server` container and mounted read-only there.
+- Use `/downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
 
 
 ## Phase 1 command flow
@@ -210,7 +208,7 @@ Notes:
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
 - `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
 - `/queuedownload`: available only for whitelisted users.
-- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `finished_downloads/<user_id>/`.
+- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `downloads/<user_id>/`.
 
 ## Telegram command menu
 
@@ -234,7 +232,7 @@ Security behavior:
 - The bot only serves `/myfolder` to whitelisted users.
 - The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
 - Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 1800 seconds).
-- The folder mapping is fixed to `finished_downloads/<user_id>/`, so user `123` only gets links to `finished_downloads/123/`.
+- The folder mapping is fixed to `downloads/<user_id>/`, so user `123` only gets links to `downloads/123/`.
 
 > Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
 
@@ -247,9 +245,9 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 - `start_download_from_file_bytes(user_id, torrent_file_bytes)`
 - `start_download_from_magnet_url(user_id, magnet_url)`
 
-Both methods store in-progress payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
+Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
 
-The service also runs a background cleanup loop that, for completed torrents, moves payloads from `DOWNLOADS_ROOT/<user_id>/...` to `FINISHED_DOWNLOADS_ROOT/<user_id>/...` and then removes completed torrents from the qBittorrent queue (for all users) to stop seeding. The cleanup interval defaults to 30 seconds.
+The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
 
 
 ## Phase 3 `/queuedownload` validation and queue flow

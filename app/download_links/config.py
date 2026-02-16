@@ -10,7 +10,7 @@ from app.config import load_env_file
 _HFS_BASE_URL_KEY = "HFS_BASE_URL"
 _DOWNLOAD_LINK_SECRET_KEY = "DOWNLOAD_LINK_SECRET"
 _DOWNLOAD_LINK_TTL_SECONDS_KEY = "DOWNLOAD_LINK_TTL_SECONDS"
-_FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
+_DOWNLOADS_ROOT_KEY = "DOWNLOADS_ROOT"
 
 
 def get_hfs_base_url() -> str | None:
@@ -47,8 +47,8 @@ def get_download_link_ttl_seconds() -> int:
     return ttl_seconds
 
 
-def get_finished_downloads_root() -> Path:
-    """Resolve local finished-downloads root path used for per-user storage."""
+def get_downloads_root() -> Path:
+    """Resolve local downloads root path used for per-user storage."""
     load_env_file()
-    root = os.getenv(_FINISHED_DOWNLOADS_ROOT_KEY, "finished_downloads")
+    root = os.getenv(_DOWNLOADS_ROOT_KEY, "downloads")
     return Path(root)

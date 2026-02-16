@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import threading
 import time
 from dataclasses import dataclass
@@ -16,7 +15,6 @@ from qbittorrent.client import LoginRequired
 
 from .config import (
     get_downloads_root,
-    get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
     get_qbittorrent_username,
@@ -56,8 +54,7 @@ class TorrentService:
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
-        self._downloads_root = (downloads_root or get_downloads_root()).resolve()
-        self._finished_downloads_root = get_finished_downloads_root().resolve()
+        self._downloads_root = downloads_root or get_downloads_root()
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
         self._username = (
             qbittorrent_username if qbittorrent_username is not None else get_qbittorrent_username()
@@ -216,50 +213,8 @@ class TorrentService:
             if not isinstance(torrent_hash, str) or not torrent_hash:
                 continue
 
-            self._move_completed_payload_to_finished_root(torrent)
             self._call_with_auth(self._client.delete, torrent_hash)
             self._logger.info("Deleted completed torrent '%s' to stop seeding", torrent_hash)
-
-    def _move_completed_payload_to_finished_root(self, torrent: dict[str, Any]) -> None:
-        """Move completed payload from downloads root to finished-downloads root."""
-        save_path = torrent.get("save_path")
-        name = torrent.get("name")
-        if not isinstance(save_path, str) or not isinstance(name, str) or not name:
-            return
-
-        source_parent = Path(save_path).resolve()
-        source_path = (source_parent / name).resolve()
-
-        if self._downloads_root not in source_path.parents:
-            self._logger.warning(
-                "Skipping move for completed torrent outside downloads root: %s",
-                source_path,
-            )
-            return
-
-        if not source_path.exists():
-            return
-
-        relative_path = source_path.relative_to(self._downloads_root)
-        destination_path = (self._finished_downloads_root / relative_path).resolve()
-
-        if self._finished_downloads_root not in destination_path.parents:
-            self._logger.warning(
-                "Skipping move for completed torrent outside finished root: %s",
-                destination_path,
-            )
-            return
-
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        if destination_path.exists():
-            self._logger.warning(
-                "Finished payload already exists, skipping move: %s",
-                destination_path,
-            )
-            return
-
-        shutil.move(str(source_path), str(destination_path))
-        self._logger.info("Moved completed payload to finished folder: %s", destination_path)
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
         """Return True when torrent is in a completed/upload state."""
