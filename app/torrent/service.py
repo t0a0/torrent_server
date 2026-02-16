@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from qbittorrent import Client
 from qbittorrent.client import LoginRequired
@@ -33,6 +33,15 @@ class QueuedTorrentStatus:
     eta_seconds: int | None
 
 
+@dataclass(frozen=True)
+class CompletedTorrent:
+    """Metadata about one torrent that has finished downloading."""
+
+    hash: str
+    name: str | None
+    user_id: int | None
+
+
 class TorrentService:
     """Thin wrapper around python-qbittorrent with per-user save directories."""
 
@@ -51,6 +60,7 @@ class TorrentService:
         qbittorrent_password: str | None = None,
         downloads_root: Path | None = None,
         completion_poll_interval_seconds: float = 30.0,
+        on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
@@ -62,6 +72,7 @@ class TorrentService:
         self._password = (
             qbittorrent_password if qbittorrent_password is not None else get_qbittorrent_password()
         )
+        self._on_torrent_completed = on_torrent_completed
 
         self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
@@ -213,8 +224,51 @@ class TorrentService:
             if not isinstance(torrent_hash, str) or not torrent_hash:
                 continue
 
+            torrent_name = torrent.get("name") if isinstance(torrent.get("name"), str) else None
+            completed_torrent = CompletedTorrent(
+                hash=torrent_hash,
+                name=torrent_name,
+                user_id=self._extract_user_id_from_torrent(torrent),
+            )
+            self._notify_torrent_completed(completed_torrent)
+
             self._call_with_auth(self._client.delete, torrent_hash)
             self._logger.info("Deleted completed torrent '%s' to stop seeding", torrent_hash)
+
+    def _notify_torrent_completed(self, torrent: CompletedTorrent) -> None:
+        """Call optional completion callback without breaking cleanup loop."""
+        if self._on_torrent_completed is None:
+            return
+
+        try:
+            self._on_torrent_completed(torrent)
+        except Exception:
+            self._logger.exception("Failed to process completed torrent notification")
+
+    def _extract_user_id_from_torrent(self, torrent: dict[str, Any]) -> int | None:
+        """Infer Telegram user id from qBittorrent save path rooted at downloads dir."""
+        save_path = torrent.get("save_path")
+        if not isinstance(save_path, str) or not save_path:
+            return None
+
+        try:
+            resolved_save_path = Path(save_path).resolve()
+        except OSError:
+            return None
+
+        if resolved_save_path == self._downloads_root:
+            return None
+        if self._downloads_root not in resolved_save_path.parents:
+            return None
+
+        relative_parts = resolved_save_path.relative_to(self._downloads_root).parts
+        if not relative_parts:
+            return None
+
+        try:
+            return int(relative_parts[0])
+        except ValueError:
+            return None
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
         """Return True when torrent is in a completed/upload state."""

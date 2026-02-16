@@ -1,5 +1,5 @@
 """Torrent services for qBittorrent integration."""
 
-from .service import TorrentService
+from .service import CompletedTorrent, TorrentService
 
-__all__ = ["TorrentService"]
+__all__ = ["TorrentService", "CompletedTorrent"]

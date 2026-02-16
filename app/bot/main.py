@@ -8,6 +8,7 @@ from .bot import create_bot
 from .commands import setup_bot_commands
 from .config import get_owner_user_id
 from .integration import include_handlers
+from .handlers import bind_runtime_bot
 
 
 def create_dispatcher() -> Dispatcher:
@@ -20,6 +21,7 @@ def create_dispatcher() -> Dispatcher:
 async def run_bot() -> None:
     """Initialize and start the bot polling loop."""
     bot = create_bot()
+    bind_runtime_bot(bot)
     await setup_bot_commands(bot=bot, owner_user_id=get_owner_user_id())
     dispatcher = create_dispatcher()
     await dispatcher.start_polling(bot)
