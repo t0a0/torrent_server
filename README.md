@@ -258,6 +258,14 @@ The service also runs a background cleanup loop that, for completed torrents, mo
 - Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
 - Valid payloads are queued via qBittorrent into `DOWNLOADS_ROOT/<telegram_user_id>/`.
 - Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
+
+## `/status` live progress behavior
+
+- `/status` is available to whitelisted users and reports active queued/downloading torrents scoped to the caller `user_id`.
+- Progress percentages are read live from qBittorrent torrent state (`progress` 0..1 => 0..100%).
+- No in-memory dictionary is required for status tracking.
+- No SQLite status table is required for live status tracking.
+- If product requirements later need history/audit (for example, recent completed torrents), that can be persisted separately while keeping live progress sourced from qBittorrent.
 - Uploaded `.torrent` files are stored in a temporary path (`TORRENT_INPUT_TMP_DIR`) and always removed after processing.
 
 ### Troubleshooting: `file_open ... Permission denied` in qBittorrent

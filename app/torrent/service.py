@@ -6,6 +6,7 @@ import logging
 import shutil
 import threading
 import time
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,17 @@ from .config import (
     get_qbittorrent_username,
     get_qbit_global_upload_limit_bytes_per_sec,
 )
+
+
+@dataclass(frozen=True)
+class QueuedTorrentStatus:
+    """A single active torrent status row for /status command output."""
+
+    name: str
+    progress_percent: float
+    state: str | None
+    dlspeed_bytes_per_sec: int | None
+    eta_seconds: int | None
 
 
 class TorrentService:
@@ -99,6 +111,57 @@ class TorrentService:
 
         save_path = self._build_user_download_path(user_id)
         self._call_with_auth(self._client.download_from_link, magnet, savepath=str(save_path))
+
+    def list_user_queued_torrents(self, user_id: int) -> list[QueuedTorrentStatus]:
+        """Return active queued/downloading torrents for a specific user."""
+        user_download_path = self._build_user_download_path(user_id).resolve()
+        torrents = self._call_with_auth(self._client.torrents)
+        if not isinstance(torrents, list):
+            return []
+
+        result: list[QueuedTorrentStatus] = []
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+
+            if self._is_completed_torrent(torrent):
+                continue
+
+            save_path = torrent.get("save_path")
+            name = torrent.get("name")
+            if not isinstance(save_path, str) or not isinstance(name, str) or not name:
+                continue
+
+            try:
+                torrent_save_path = Path(save_path).resolve()
+            except OSError:
+                continue
+
+            if torrent_save_path != user_download_path and user_download_path not in torrent_save_path.parents:
+                continue
+
+            progress = torrent.get("progress")
+            if isinstance(progress, (int, float)):
+                progress_ratio = max(0.0, min(float(progress), 1.0))
+            else:
+                progress_ratio = 0.0
+
+            state = torrent.get("state") if isinstance(torrent.get("state"), str) else None
+            dlspeed = torrent.get("dlspeed")
+            eta = torrent.get("eta")
+
+            result.append(
+                QueuedTorrentStatus(
+                    name=name,
+                    progress_percent=round(progress_ratio * 100.0, 1),
+                    state=state,
+                    dlspeed_bytes_per_sec=dlspeed if isinstance(dlspeed, int) else None,
+                    eta_seconds=eta if isinstance(eta, int) else None,
+                )
+            )
+
+        result.sort(key=lambda item: item.name.lower())
+        return result
 
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""

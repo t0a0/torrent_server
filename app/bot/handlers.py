@@ -147,6 +147,44 @@ async def handle_queuedownload(message: Message) -> None:
     await message.answer("Paste a magnet URL or upload a .torrent file.")
 
 
+@router.message(Command("status"))
+async def handle_status(message: Message) -> None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
+        return
+
+    if torrent_service is None:
+        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        return
+
+    user_id, _ = actor
+    try:
+        queued_torrents = await asyncio.wait_for(
+            asyncio.to_thread(
+                torrent_service.list_user_queued_torrents,
+                user_id,
+            ),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+    except TimeoutError:
+        await message.answer(_map_qbit_user_message("qbit_timeout"))
+        return
+    except Exception as exc:
+        reason = _map_qbit_error(exc)
+        await message.answer(_map_qbit_user_message(reason))
+        return
+
+    if not queued_torrents:
+        await message.answer("You have no active queued torrents.")
+        return
+
+    lines = ["Your active torrents:"]
+    for torrent in queued_torrents:
+        lines.append(f"• {torrent.name} — {torrent.progress_percent:.1f}%")
+
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("myfolder"))
 async def handle_myfolder(message: Message) -> None:
     actor = await _require_whitelisted(message)
