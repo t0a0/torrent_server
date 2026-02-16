@@ -133,7 +133,9 @@ class TorrentService:
             if not isinstance(torrent_hash, str) or not torrent_hash:
                 continue
 
-            self._call_with_auth(self._client.delete, hashes=torrent_hash, delete_files=False)
+            # `python-qbittorrent` client signatures vary across versions
+            # (`hash` vs `hashes`). Pass arguments positionally to stay compatible.
+            self._call_with_auth(self._client.delete, torrent_hash, False)
             self._logger.info("Deleted completed torrent '%s' to stop seeding", torrent_hash)
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
