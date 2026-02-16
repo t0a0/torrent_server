@@ -8,7 +8,7 @@ import logging
 import secrets
 import time
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -16,7 +16,7 @@ from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
-from app.torrent import TorrentService
+from app.torrent import CompletedTorrent, TorrentService
 from app.torrent.config import (
     get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
@@ -62,6 +62,57 @@ queue_download_policy = QueueDownloadPolicyService(
 )
 
 
+class _CompletionNotifier:
+    def __init__(self) -> None:
+        self._bot: Bot | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def bind_runtime(self, bot: Bot) -> None:
+        self._bot = bot
+        self._loop = asyncio.get_running_loop()
+
+    def on_torrent_completed(self, torrent: CompletedTorrent) -> None:
+        if torrent.user_id is None:
+            logger.warning("Cannot notify torrent completion without user_id hash=%s", torrent.hash)
+            return
+
+        if self._bot is None or self._loop is None:
+            logger.warning("Bot runtime is not bound yet; skipping completion notification hash=%s", torrent.hash)
+            return
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_completion_message(torrent),
+            self._loop,
+        )
+
+        def _handle_result(done_future: asyncio.Future[None]) -> None:
+            try:
+                done_future.result()
+            except Exception:
+                logger.exception("Failed to send completion notification hash=%s", torrent.hash)
+
+        future.add_done_callback(_handle_result)
+
+    async def _send_completion_message(self, torrent: CompletedTorrent) -> None:
+        assert self._bot is not None
+        assert torrent.user_id is not None
+
+        torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
+        text = f"✅ Download finished: <b>{torrent_name}</b>"
+        if download_link_service is not None and download_link_service.is_configured():
+            folder_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
+            text = f"{text}\n\nYour download folder link:\n{folder_link}"
+
+        await self._bot.send_message(
+            chat_id=torrent.user_id,
+            text=text,
+            parse_mode="HTML",
+        )
+
+
+completion_notifier = _CompletionNotifier()
+
+
 def _build_download_link_service() -> DownloadLinkService | None:
     try:
         return DownloadLinkService()
@@ -71,7 +122,7 @@ def _build_download_link_service() -> DownloadLinkService | None:
 
 def _build_torrent_service() -> TorrentService | None:
     try:
-        return TorrentService()
+        return TorrentService(on_torrent_completed=completion_notifier.on_torrent_completed)
     except ValueError:
         logger.exception("Failed to initialize TorrentService")
         return None
@@ -79,6 +130,11 @@ def _build_torrent_service() -> TorrentService | None:
 
 download_link_service = _build_download_link_service()
 torrent_service = _build_torrent_service()
+
+
+def bind_runtime_bot(bot: Bot) -> None:
+    """Bind active bot/loop so background workers can send Telegram notifications."""
+    completion_notifier.bind_runtime(bot)
 
 
 def _get_actor(message: Message) -> tuple[int, str | None] | None:
