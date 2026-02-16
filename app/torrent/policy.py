@@ -1,4 +1,4 @@
-"""Stateful policies for /add flow (rate limiting, dedupe, and metrics)."""
+"""Stateful policies for /add flow (rate limiting and metrics)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ class AddPolicyService:
     def __init__(self, adds_per_minute: int) -> None:
         self._adds_per_minute = max(1, adds_per_minute)
         self._recent_adds_by_user: dict[int, deque[float]] = {}
-        self._seen_infohashes: set[str] = set()
         self._metrics = Counter()
         self._lock = threading.Lock()
 
@@ -27,16 +26,8 @@ class AddPolicyService:
             window.append(now)
             return True
 
-    def is_duplicate(self, infohash: str) -> bool:
+    def mark_accepted(self) -> None:
         with self._lock:
-            if infohash in self._seen_infohashes:
-                self._metrics["rejected:duplicate"] += 1
-                return True
-            return False
-
-    def mark_accepted(self, infohash: str) -> None:
-        with self._lock:
-            self._seen_infohashes.add(infohash)
             self._metrics["accepted"] += 1
 
     def mark_rejection(self, reason: str) -> None:

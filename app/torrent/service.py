@@ -80,20 +80,6 @@ class TorrentService:
         save_path = self._build_user_download_path(user_id)
         self._call_with_auth(self._client.download_from_link, magnet, savepath=str(save_path))
 
-    def is_infohash_present(self, infohash: str) -> bool:
-        """Return whether qBittorrent currently has a torrent with this infohash."""
-        target = infohash.lower()
-        torrents = self._call_with_auth(self._client.torrents)
-        if not isinstance(torrents, list):
-            return False
-        for torrent in torrents:
-            if not isinstance(torrent, dict):
-                continue
-            candidate = torrent.get("hash")
-            if isinstance(candidate, str) and candidate.lower() == target:
-                return True
-        return False
-
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""
         if not self._username or not self._password:

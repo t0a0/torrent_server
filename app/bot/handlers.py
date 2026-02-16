@@ -349,12 +349,6 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
         )
         infohash = validation.infohash
 
-        if add_policy.is_duplicate(infohash) or torrent_service.is_infohash_present(infohash):
-            add_policy.mark_rejection("duplicate")
-            reason = "duplicate"
-            await message.answer("This torrent is already queued or processed.")
-            return
-
         started_at = time.monotonic()
         await asyncio.wait_for(
             asyncio.to_thread(
@@ -365,7 +359,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
             timeout=qbit_timeout_seconds,
         )
         add_policy.mark_qbit_latency(time.monotonic() - started_at)
-        add_policy.mark_accepted(infohash)
+        add_policy.mark_accepted()
         add_session_state.clear_waiting(user_id)
         await message.answer("Torrent accepted and queued for download.")
     except ValidationError as exc:
@@ -404,12 +398,6 @@ async def _process_magnet_input(message: Message, user_id: int, text: str) -> No
         )
         infohash = validation.infohash
 
-        if add_policy.is_duplicate(infohash) or torrent_service is not None and torrent_service.is_infohash_present(infohash):
-            add_policy.mark_rejection("duplicate")
-            reason = "duplicate"
-            await message.answer("This magnet is already queued or processed.")
-            return
-
         if torrent_service is None:
             reason = "service_unavailable"
             await message.answer("Torrent service is currently unavailable. Please contact admin.")
@@ -425,7 +413,7 @@ async def _process_magnet_input(message: Message, user_id: int, text: str) -> No
             timeout=qbit_timeout_seconds,
         )
         add_policy.mark_qbit_latency(time.monotonic() - started_at)
-        add_policy.mark_accepted(infohash)
+        add_policy.mark_accepted()
         add_session_state.clear_waiting(user_id)
         await message.answer("Magnet accepted and queued for download.")
     except ValidationError as exc:
