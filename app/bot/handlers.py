@@ -133,10 +133,10 @@ async def handle_start(message: Message) -> None:
         )
         return
 
-    await message.answer("Welcome! Use /add to submit a torrent or magnet link.")
+    await message.answer("Welcome! Use /queuedownload to submit a torrent or magnet link.")
 
 
-@router.message(Command("add"))
+@router.message(Command("queuedownload"))
 async def handle_add(message: Message) -> None:
     actor = await _require_whitelisted(message)
     if actor is None:
@@ -144,7 +144,7 @@ async def handle_add(message: Message) -> None:
 
     user_id, _ = actor
     if not add_policy.enforce_rate_limit(user_id):
-        await message.answer("Too many add requests right now. Please wait a minute and try again.")
+        await message.answer("Too many queue requests right now. Please wait a minute and try again.")
         return
 
     add_session_state.begin_waiting(user_id)
@@ -319,7 +319,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
     if document.file_size is not None and document.file_size > max_torrent_bytes_hard:
         await message.answer("Torrent file is too large.")
         add_policy.mark_rejection("torrent_size_hard")
-        logger.info("/add rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
+        logger.info("/queuedownload rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
         return
 
     temp_path = tmp_input_dir / f"{secrets.token_hex(16)}.torrent"
@@ -337,7 +337,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
             return
 
         if len(torrent_bytes) > max_torrent_bytes_warn:
-            logger.warning("/add large torrent metadata user_id=%s size=%s", user_id, len(torrent_bytes))
+            logger.warning("/queuedownload large torrent metadata user_id=%s size=%s", user_id, len(torrent_bytes))
 
         validation = validate_torrent_file_bytes(
             torrent_bytes=torrent_bytes,
@@ -376,7 +376,7 @@ async def _process_torrent_upload(message: Message, user_id: int) -> None:
         await message.answer(_map_qbit_user_message(reason))
     finally:
         logger.info(
-            "/add torrent upload decision user_id=%s size=%s infohash=%s reason=%s",
+            "/queuedownload torrent upload decision user_id=%s size=%s infohash=%s reason=%s",
             user_id,
             document.file_size,
             infohash,
@@ -430,7 +430,7 @@ async def _process_magnet_input(message: Message, user_id: int, text: str) -> No
         await message.answer(_map_qbit_user_message(reason))
     finally:
         logger.info(
-            "/add magnet decision user_id=%s size=%s infohash=%s reason=%s",
+            "/queuedownload magnet decision user_id=%s size=%s infohash=%s reason=%s",
             user_id,
             len(text),
             infohash,

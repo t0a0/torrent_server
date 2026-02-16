@@ -1,4 +1,4 @@
-"""Stateful policies for /add flow (rate limiting and metrics)."""
+"""Stateful policies for /queuedownload flow (rate limiting and metrics)."""
 
 from __future__ import annotations
 
