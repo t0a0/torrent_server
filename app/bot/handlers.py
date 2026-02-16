@@ -180,7 +180,7 @@ async def handle_status(message: Message) -> None:
 
     lines = ["Your active torrents:"]
     for torrent in queued_torrents:
-        torrent_name = escape(torrent.name)
+        torrent_name = escape(torrent.name[:64])
         torrent_state = escape(torrent.state or "unknown")
         lines.append(
             f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
