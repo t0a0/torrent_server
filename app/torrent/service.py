@@ -53,10 +53,14 @@ class TorrentService:
         self._start_completion_cleanup_worker()
 
     def _build_user_download_path(self, user_id: int) -> Path:
-        """Create and return `downloads/<user_id>` directory."""
-        user_download_path = self._downloads_root / str(user_id)
-        user_download_path.mkdir(parents=True, exist_ok=True)
-        return user_download_path
+        """Return `downloads/<user_id>` path and avoid creating root-owned directories.
+
+        In Docker deployments, the bot and qBittorrent usually run as different users.
+        If the bot eagerly creates `downloads/<user_id>`, qBittorrent can fail writing
+        payload files with `Permission denied` because it does not own that directory.
+        We therefore pass the path to qBittorrent without creating it here.
+        """
+        return self._downloads_root / str(user_id)
 
     def start_download_from_file_bytes(self, user_id: int, torrent_file_bytes: bytes) -> None:
         """Queue torrent file bytes for download into `downloads/<user_id>` directory."""
