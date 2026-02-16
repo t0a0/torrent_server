@@ -24,21 +24,14 @@ from .config import (
 
 @dataclass(frozen=True)
 class QueuedTorrentStatus:
-    """A single active torrent status row for /status command output."""
+    """A single active torrent status row for /status and /canceldownload output."""
 
+    hash: str
     name: str
     progress_percent: float
     state: str | None
     dlspeed_bytes_per_sec: int | None
     eta_seconds: int | None
-
-
-@dataclass(frozen=True)
-class ActiveUserTorrent:
-    """Minimal torrent metadata used by cancel UI flow."""
-
-    hash: str
-    name: str
 
 
 @dataclass(frozen=True)
@@ -149,6 +142,10 @@ class TorrentService:
             if not self._is_user_torrent(torrent=torrent, user_id=user_id):
                 continue
 
+            torrent_hash = torrent.get("hash")
+            if not isinstance(torrent_hash, str) or not torrent_hash:
+                continue
+
             progress = torrent.get("progress")
             if isinstance(progress, (int, float)):
                 progress_ratio = max(0.0, min(float(progress), 1.0))
@@ -161,6 +158,7 @@ class TorrentService:
 
             result.append(
                 QueuedTorrentStatus(
+                    hash=torrent_hash,
                     name=name,
                     progress_percent=round(progress_ratio * 100.0, 1),
                     state=state,
@@ -172,58 +170,18 @@ class TorrentService:
         result.sort(key=lambda item: item.name.lower())
         return result
 
-    def list_user_active_torrents(self, user_id: int) -> list[ActiveUserTorrent]:
-        """Return active user torrents with their hashes for cancel flow."""
-        torrents = self._call_with_auth(self._client.torrents)
-        if not isinstance(torrents, list):
-            return []
-
-        result: list[ActiveUserTorrent] = []
-        for torrent in torrents:
-            if not isinstance(torrent, dict):
-                continue
-            if self._is_completed_torrent(torrent):
-                continue
-            if not self._is_user_torrent(torrent=torrent, user_id=user_id):
-                continue
-
-            torrent_hash = torrent.get("hash")
-            torrent_name = torrent.get("name")
-            if not isinstance(torrent_hash, str) or not torrent_hash:
-                continue
-            if not isinstance(torrent_name, str) or not torrent_name:
-                continue
-
-            result.append(ActiveUserTorrent(hash=torrent_hash, name=torrent_name))
-
-        result.sort(key=lambda item: item.name.lower())
-        return result
-
     def cancel_user_torrent(self, user_id: int, torrent_hash: str) -> bool:
         """Cancel an active torrent owned by user and remove downloaded files."""
         normalized_hash = torrent_hash.strip().lower()
         if not normalized_hash:
             return False
 
-        torrents = self._call_with_auth(self._client.torrents)
-        if not isinstance(torrents, list):
-            return False
-
-        for torrent in torrents:
-            if not isinstance(torrent, dict):
-                continue
-            if self._is_completed_torrent(torrent):
-                continue
-            if not self._is_user_torrent(torrent=torrent, user_id=user_id):
+        active_torrents = self.list_user_queued_torrents(user_id)
+        for torrent in active_torrents:
+            if torrent.hash.lower() != normalized_hash:
                 continue
 
-            active_hash = torrent.get("hash")
-            if not isinstance(active_hash, str):
-                continue
-            if active_hash.lower() != normalized_hash:
-                continue
-
-            self._delete_torrent_and_files(active_hash)
+            self._delete_torrent_and_files(torrent.hash)
             return True
 
         return False

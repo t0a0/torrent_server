@@ -119,22 +119,18 @@ completion_notifier = _CompletionNotifier()
 def _with_cancel_hint(text: str) -> str:
     return f"{text} You can run /cancel to cancel the current command."
 
-def _truncate_button_title(name: str) -> str:
-    return name if len(name) <= 64 else f"{name[:61]}..."
-
-
 def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
     if torrent_service is None:
         return None
 
-    active_torrents = torrent_service.list_user_active_torrents(user_id)
+    active_torrents = torrent_service.list_user_queued_torrents(user_id)
     if not active_torrents:
         return None
 
     rows = [
         [
             InlineKeyboardButton(
-                text=_truncate_button_title(torrent.name),
+                text=torrent.name[:64],
                 callback_data=f"cancel_torrent:{torrent.hash}",
             )
         ]
