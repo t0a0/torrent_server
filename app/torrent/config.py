@@ -97,10 +97,6 @@ def get_max_torrent_aggregate_size_bytes() -> int:
 
 
 def get_queue_download_rate_limit_per_min() -> int:
-    legacy_key = "ADD_RATE_LIMIT_PER_MIN"
-    load_env_file()
-    if os.getenv(legacy_key) is not None and os.getenv(_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY) is None:
-        return _get_int_env(legacy_key, 10)
     return _get_int_env(_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY, 10)
 
 
