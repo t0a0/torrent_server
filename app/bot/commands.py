@@ -11,6 +11,7 @@ NON_WHITELISTED_COMMANDS = [
 WHITELISTED_COMMANDS = [
     BotCommand(command="start", description="Start bot"),
     BotCommand(command="queuedownload", description="Queue torrent or magnet"),
+    BotCommand(command="status", description="Show current torrent progress"),
     BotCommand(command="myfolder", description="Get private download folder link"),
 ]
 
