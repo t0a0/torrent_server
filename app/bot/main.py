@@ -1,6 +1,7 @@
 """Executable entrypoint for running the Telegram bot via long polling."""
 
 import asyncio
+import logging
 
 from aiogram import Dispatcher
 
@@ -29,6 +30,7 @@ async def run_bot() -> None:
 
 def main() -> None:
     """Run bot in a dedicated asyncio event loop."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     asyncio.run(run_bot())
 
 

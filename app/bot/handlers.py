@@ -150,6 +150,43 @@ def _get_actor(message: Message) -> tuple[int, str | None] | None:
     return actor.id, actor.username
 
 
+def _log_command_trigger(message: Message, command: str) -> None:
+    actor = _get_actor(message)
+    if actor is None:
+        logger.info("command_triggered command=%s user_id=<unknown>", command)
+        return
+
+    user_id, username = actor
+    logger.info(
+        "command_triggered command=%s user_id=%s username=%s",
+        command,
+        user_id,
+        username or "<none>",
+    )
+
+
+def _log_command_exit(message: Message, command: str, outcome: str, detail: str) -> None:
+    actor = _get_actor(message)
+    if actor is None:
+        logger.info(
+            "command_exit command=%s user_id=<unknown> outcome=%s detail=%s",
+            command,
+            outcome,
+            detail,
+        )
+        return
+
+    user_id, username = actor
+    logger.info(
+        "command_exit command=%s user_id=%s username=%s outcome=%s detail=%s",
+        command,
+        user_id,
+        username or "<none>",
+        outcome,
+        detail,
+    )
+
+
 async def _require_admin(message: Message) -> tuple[int, str | None] | None:
     actor = _get_actor(message)
     if actor is None:
@@ -178,218 +215,322 @@ async def _require_whitelisted(message: Message) -> tuple[int, str | None] | Non
 
 @router.message(Command("start"))
 async def handle_start(message: Message) -> None:
-    actor = _get_actor(message)
-    if actor is None:
-        await message.answer("Cannot resolve caller identity.")
-        return
+    _log_command_trigger(message, "start")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        actor = _get_actor(message)
+        if actor is None:
+            await message.answer("Cannot resolve caller identity.")
+            outcome = "error"
+            detail = "missing_actor"
+            return
 
-    user_id, _ = actor
-    if not auth_service.is_whitelisted(user_id):
-        await message.answer(
-            "You are not whitelisted yet. Request an access token from the admin and "
-            "use /authenticate <token> to get whitelisted before using the bot."
-        )
-        return
+        user_id, _ = actor
+        if not auth_service.is_whitelisted(user_id):
+            await message.answer(
+                "You are not whitelisted yet. Request an access token from the admin and "
+                "use /authenticate <token> to get whitelisted before using the bot."
+            )
+            outcome = "no_action"
+            detail = "not_whitelisted"
+            return
 
-    await message.answer("Welcome! Use /queuedownload to submit a torrent or magnet link.")
+        await message.answer("Welcome! Use /queuedownload to submit a torrent or magnet link.")
+        outcome = "success"
+        detail = "welcome_message_sent"
+    finally:
+        _log_command_exit(message, "start", outcome, detail)
 
 
 @router.message(Command("queuedownload"))
 async def handle_queuedownload(message: Message) -> None:
-    actor = await _require_whitelisted(message)
-    if actor is None:
-        return
+    _log_command_trigger(message, "queuedownload")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        actor = await _require_whitelisted(message)
+        if actor is None:
+            detail = "not_whitelisted_or_missing_actor"
+            return
 
-    user_id, _ = actor
-    if not queue_download_policy.enforce_rate_limit(user_id):
-        await message.answer("Too many queue requests right now. Please wait a minute and try again.")
-        return
+        user_id, _ = actor
+        if not queue_download_policy.enforce_rate_limit(user_id):
+            await message.answer("Too many queue requests right now. Please wait a minute and try again.")
+            detail = "rate_limited"
+            return
 
-    queue_download_session_state.begin_waiting(user_id=user_id, command="queuedownload")
-    await message.answer("Paste a magnet URL or upload a .torrent file.")
+        queue_download_session_state.begin_waiting(user_id=user_id, command="queuedownload")
+        await message.answer("Paste a magnet URL or upload a .torrent file.")
+        outcome = "success"
+        detail = "awaiting_torrent_input"
+    finally:
+        _log_command_exit(message, "queuedownload", outcome, detail)
 
 
 @router.message(Command("cancel"))
 async def handle_cancel(message: Message) -> None:
-    actor = _get_actor(message)
-    if actor is None:
-        await message.answer("Cannot resolve caller identity.")
-        return
+    _log_command_trigger(message, "cancel")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        actor = _get_actor(message)
+        if actor is None:
+            await message.answer("Cannot resolve caller identity.")
+            outcome = "error"
+            detail = "missing_actor"
+            return
 
-    user_id, _ = actor
-    waiting_command = queue_download_session_state.get_waiting_command(user_id)
-    if waiting_command is None:
-        await message.answer("There is no pending command input to cancel.")
-        return
+        user_id, _ = actor
+        waiting_command = queue_download_session_state.get_waiting_command(user_id)
+        if waiting_command is None:
+            await message.answer("There is no pending command input to cancel.")
+            detail = "no_pending_input"
+            return
 
-    queue_download_session_state.clear_waiting(user_id)
-    await message.answer(f"Cancelled /{waiting_command} input.")
+        queue_download_session_state.clear_waiting(user_id)
+        await message.answer(f"Cancelled /{waiting_command} input.")
+        outcome = "success"
+        detail = f"cancelled_{waiting_command}"
+    finally:
+        _log_command_exit(message, "cancel", outcome, detail)
 
 
 @router.message(Command("status"))
 async def handle_status(message: Message) -> None:
-    actor = await _require_whitelisted(message)
-    if actor is None:
-        return
-
-    if torrent_service is None:
-        await message.answer("Torrent service is currently unavailable. Please contact admin.")
-        return
-
-    user_id, _ = actor
+    _log_command_trigger(message, "status")
+    outcome = "no_action"
+    detail = "unknown"
     try:
-        queued_torrents = await asyncio.wait_for(
-            asyncio.to_thread(
-                torrent_service.list_user_queued_torrents,
-                user_id,
-            ),
-            timeout=get_qbit_api_timeout_seconds(),
-        )
-    except TimeoutError:
-        await message.answer(_map_qbit_user_message("qbit_timeout"))
-        return
-    except Exception as exc:
-        reason = _map_qbit_error(exc)
-        await message.answer(_map_qbit_user_message(reason))
-        return
+        actor = await _require_whitelisted(message)
+        if actor is None:
+            detail = "not_whitelisted_or_missing_actor"
+            return
 
-    if not queued_torrents:
-        await message.answer("You have no active queued torrents.")
-        return
+        if torrent_service is None:
+            await message.answer("Torrent service is currently unavailable. Please contact admin.")
+            outcome = "error"
+            detail = "torrent_service_unavailable"
+            return
 
-    lines = ["Your active torrents:"]
-    for torrent in queued_torrents:
-        torrent_name = escape(torrent.name[:64])
-        torrent_state = escape(torrent.state or "unknown")
-        lines.append(
-            f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
-        )
+        user_id, _ = actor
+        try:
+            queued_torrents = await asyncio.wait_for(
+                asyncio.to_thread(
+                    torrent_service.list_user_queued_torrents,
+                    user_id,
+                ),
+                timeout=get_qbit_api_timeout_seconds(),
+            )
+        except TimeoutError:
+            await message.answer(_map_qbit_user_message("qbit_timeout"))
+            outcome = "error"
+            detail = "qbit_timeout"
+            return
+        except Exception as exc:
+            reason = _map_qbit_error(exc)
+            await message.answer(_map_qbit_user_message(reason))
+            outcome = "error"
+            detail = reason
+            return
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+        if not queued_torrents:
+            await message.answer("You have no active queued torrents.")
+            detail = "no_active_torrents"
+            return
+
+        lines = ["Your active torrents:"]
+        for torrent in queued_torrents:
+            torrent_name = escape(torrent.name[:64])
+            torrent_state = escape(torrent.state or "unknown")
+            lines.append(
+                f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
+            )
+
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        outcome = "success"
+        detail = f"returned_{len(queued_torrents)}_torrents"
+    finally:
+        _log_command_exit(message, "status", outcome, detail)
 
 
 @router.message(Command("myfolder"))
 async def handle_myfolder(message: Message) -> None:
-    actor = await _require_whitelisted(message)
-    if actor is None:
-        return
+    _log_command_trigger(message, "myfolder")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        actor = await _require_whitelisted(message)
+        if actor is None:
+            detail = "not_whitelisted_or_missing_actor"
+            return
 
-    if download_link_service is None or not download_link_service.is_configured():
+        if download_link_service is None or not download_link_service.is_configured():
+            await message.answer(
+                "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
+                "and DOWNLOAD_LINK_SECRET."
+            )
+            outcome = "error"
+            detail = "download_links_not_configured"
+            return
+
+        user_id, _ = actor
+        folder_link = download_link_service.build_user_folder_link(user_id=user_id)
         await message.answer(
-            "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
-            "and DOWNLOAD_LINK_SECRET."
+            "Your personal download folder link (expires automatically):\n"
+            f"{folder_link}\n\n"
+            "This link is scoped to your Telegram user folder only."
         )
-        return
-
-    user_id, _ = actor
-    folder_link = download_link_service.build_user_folder_link(user_id=user_id)
-    await message.answer(
-        "Your personal download folder link (expires automatically):\n"
-        f"{folder_link}\n\n"
-        "This link is scoped to your Telegram user folder only."
-    )
+        outcome = "success"
+        detail = "folder_link_sent"
+    finally:
+        _log_command_exit(message, "myfolder", outcome, detail)
 
 
 @router.message(Command("generateaccesstoken"))
 async def handle_generate_access_token(message: Message) -> None:
-    if await _require_admin(message) is None:
-        return
+    _log_command_trigger(message, "generateaccesstoken")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        if await _require_admin(message) is None:
+            detail = "admin_required_or_missing_actor"
+            return
 
-    token = auth_service.generate_access_token()
-    await message.answer(
-        "Here is your access token command. Click the code below to copy it, "
-        "then paste and send it to the bot.\n"
-        "Valid for 30 minutes and single-use:\n"
-        f"`/authenticate {token}`",
-        parse_mode="Markdown",
-    )
+        token = auth_service.generate_access_token()
+        await message.answer(
+            "Here is your access token command. Click the code below to copy it, "
+            "then paste and send it to the bot.\n"
+            "Valid for 30 minutes and single-use:\n"
+            f"`/authenticate {token}`",
+            parse_mode="Markdown",
+        )
+        outcome = "success"
+        detail = "token_generated"
+    finally:
+        _log_command_exit(message, "generateaccesstoken", outcome, detail)
 
 
 @router.message(Command("authenticate"))
 async def handle_authenticate(message: Message, command: CommandObject) -> None:
-    actor = _get_actor(message)
-    if actor is None:
-        await message.answer("Cannot resolve caller identity.")
-        return
+    _log_command_trigger(message, "authenticate")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        actor = _get_actor(message)
+        if actor is None:
+            await message.answer("Cannot resolve caller identity.")
+            outcome = "error"
+            detail = "missing_actor"
+            return
 
-    user_id, username = actor
-    if auth_service.is_whitelisted(user_id):
-        await message.answer("You are already whitelisted. Auth token was not consumed.")
-        return
+        user_id, username = actor
+        if auth_service.is_whitelisted(user_id):
+            await message.answer("You are already whitelisted. Auth token was not consumed.")
+            detail = "already_whitelisted"
+            return
 
-    token = (command.args or "").strip()
-    if not token:
-        await message.answer("Usage: /authenticate <token>")
-        return
+        token = (command.args or "").strip()
+        if not token:
+            await message.answer("Usage: /authenticate <token>")
+            detail = "missing_token"
+            return
 
-    if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
-        await message.answer("Authentication successful. You are now whitelisted.")
-        await setup_whitelisted_commands(
-            bot=message.bot,
-            user_id=user_id,
-            is_admin=auth_service.is_admin(user_id=user_id),
-        )
-        owner_user_id = get_owner_user_id()
-        if owner_user_id is not None:
-            username_display = f"@{username}" if username else "<none>"
-            await message.bot.send_message(
-                chat_id=owner_user_id,
-                text=(
-                    "User authenticated successfully:\n"
-                    f"- user_id: <code>{user_id}</code>\n"
-                    f"- username: {escape(username_display)}"
-                ),
-                parse_mode="HTML",
+        if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
+            await message.answer("Authentication successful. You are now whitelisted.")
+            await setup_whitelisted_commands(
+                bot=message.bot,
+                user_id=user_id,
+                is_admin=auth_service.is_admin(user_id=user_id),
             )
-        return
+            owner_user_id = get_owner_user_id()
+            if owner_user_id is not None:
+                username_display = f"@{username}" if username else "<none>"
+                await message.bot.send_message(
+                    chat_id=owner_user_id,
+                    text=(
+                        "User authenticated successfully:\n"
+                        f"- user_id: <code>{user_id}</code>\n"
+                        f"- username: {escape(username_display)}"
+                    ),
+                    parse_mode="HTML",
+                )
+            outcome = "success"
+            detail = "authenticated"
+            return
 
-    await message.answer("Invalid or expired token.")
+        await message.answer("Invalid or expired token.")
+        detail = "invalid_or_expired_token"
+    finally:
+        _log_command_exit(message, "authenticate", outcome, detail)
 
 
 @router.message(Command("removeuser"))
 async def handle_removeuser(message: Message, command: CommandObject) -> None:
-    if await _require_admin(message) is None:
-        return
-
-    raw_user_id = (command.args or "").strip()
-    if not raw_user_id:
-        await message.answer("Usage: /removeuser <user_id>")
-        return
-
+    _log_command_trigger(message, "removeuser")
+    outcome = "no_action"
+    detail = "unknown"
     try:
-        target_user_id = int(raw_user_id)
-    except ValueError:
-        await message.answer("user_id must be an integer.")
-        return
+        if await _require_admin(message) is None:
+            detail = "admin_required_or_missing_actor"
+            return
 
-    if auth_service.remove_user(target_user_id):
-        await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
-        await message.answer(f"Removed user {target_user_id} from whitelist.")
-        return
+        raw_user_id = (command.args or "").strip()
+        if not raw_user_id:
+            await message.answer("Usage: /removeuser <user_id>")
+            detail = "missing_user_id"
+            return
 
-    await message.answer(f"User {target_user_id} is not whitelisted.")
+        try:
+            target_user_id = int(raw_user_id)
+        except ValueError:
+            await message.answer("user_id must be an integer.")
+            detail = "invalid_user_id"
+            return
+
+        if auth_service.remove_user(target_user_id):
+            await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
+            await message.answer(f"Removed user {target_user_id} from whitelist.")
+            outcome = "success"
+            detail = f"removed_user_{target_user_id}"
+            return
+
+        await message.answer(f"User {target_user_id} is not whitelisted.")
+        detail = "user_not_whitelisted"
+    finally:
+        _log_command_exit(message, "removeuser", outcome, detail)
 
 
 @router.message(Command("whitelist"))
 async def handle_whitelist(message: Message) -> None:
-    if await _require_admin(message) is None:
-        return
+    _log_command_trigger(message, "whitelist")
+    outcome = "no_action"
+    detail = "unknown"
+    try:
+        if await _require_admin(message) is None:
+            detail = "admin_required_or_missing_actor"
+            return
 
-    users = auth_service.list_whitelisted_users()
-    if not users:
-        await message.answer("Whitelist is empty.")
-        return
+        users = auth_service.list_whitelisted_users()
+        if not users:
+            await message.answer("Whitelist is empty.")
+            detail = "whitelist_empty"
+            return
 
-    lines = ["Whitelisted users:"]
-    for user in users:
-        username = user.username_at_authentication
-        username_display = f"@{username}" if username else "<none>"
-        lines.append(
-            f"- user_id=<code>{user.user_id}</code>, "
-            f"username_at_authentication={escape(username_display)}"
-        )
+        lines = ["Whitelisted users:"]
+        for user in users:
+            username = user.username_at_authentication
+            username_display = f"@{username}" if username else "<none>"
+            lines.append(
+                f"- user_id=<code>{user.user_id}</code>, "
+                f"username_at_authentication={escape(username_display)}"
+            )
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        outcome = "success"
+        detail = f"returned_{len(users)}_users"
+    finally:
+        _log_command_exit(message, "whitelist", outcome, detail)
 
 
 @router.message()
