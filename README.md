@@ -256,3 +256,10 @@ The service also runs a background cleanup loop that automatically removes compl
 - Valid payloads are queued via qBittorrent into `DOWNLOADS_ROOT/<telegram_user_id>/`.
 - Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
 - Uploaded `.torrent` files are stored in a temporary path (`TORRENT_INPUT_TMP_DIR`) and always removed after processing.
+
+### Troubleshooting: `file_open ... Permission denied` in qBittorrent
+
+If qBittorrent reports a permission error under `/downloads/<telegram_user_id>/...`, it usually means that folder was created by a different container user (for example, the bot as root) and is not writable by qBittorrent.
+
+Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
+
