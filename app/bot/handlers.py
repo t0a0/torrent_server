@@ -44,16 +44,19 @@ auth_service = AuthService(
 
 class _QueueDownloadSessionState:
     def __init__(self) -> None:
-        self._waiting_users: set[int] = set()
+        self._waiting_users: dict[int, str] = {}
 
-    def begin_waiting(self, user_id: int) -> None:
-        self._waiting_users.add(user_id)
+    def begin_waiting(self, user_id: int, command: str) -> None:
+        self._waiting_users[user_id] = command
 
     def is_waiting(self, user_id: int) -> bool:
         return user_id in self._waiting_users
 
+    def get_waiting_command(self, user_id: int) -> str | None:
+        return self._waiting_users.get(user_id)
+
     def clear_waiting(self, user_id: int) -> None:
-        self._waiting_users.discard(user_id)
+        self._waiting_users.pop(user_id, None)
 
 
 queue_download_session_state = _QueueDownloadSessionState()
@@ -199,8 +202,25 @@ async def handle_queuedownload(message: Message) -> None:
         await message.answer("Too many queue requests right now. Please wait a minute and try again.")
         return
 
-    queue_download_session_state.begin_waiting(user_id)
+    queue_download_session_state.begin_waiting(user_id=user_id, command="queuedownload")
     await message.answer("Paste a magnet URL or upload a .torrent file.")
+
+
+@router.message(Command("cancel"))
+async def handle_cancel(message: Message) -> None:
+    actor = _get_actor(message)
+    if actor is None:
+        await message.answer("Cannot resolve caller identity.")
+        return
+
+    user_id, _ = actor
+    waiting_command = queue_download_session_state.get_waiting_command(user_id)
+    if waiting_command is None:
+        await message.answer("There is no pending command input to cancel.")
+        return
+
+    queue_download_session_state.clear_waiting(user_id)
+    await message.answer(f"Cancelled /{waiting_command} input.")
 
 
 @router.message(Command("status"))
