@@ -10,9 +10,11 @@ services:
       - file-server
     volumes:
       - downloads:/downloads
+      - finished_downloads:/finished_downloads
       - auth_data:/auth
     environment:
       DOWNLOADS_ROOT: /downloads
+      FINISHED_DOWNLOADS_ROOT: /finished_downloads
       QBITTORRENT_URL: http://qbittorrent:8080
       AUTH_DB_PATH: /auth/auth.db
     develop:
@@ -48,7 +50,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - downloads:/srv/downloads:ro
+      - finished_downloads:/srv/downloads:ro
     environment:
       DOWNLOAD_LINK_SECRET: ${DOWNLOAD_LINK_SECRET}
     restart: unless-stopped
@@ -56,4 +58,5 @@ services:
 volumes:
   qbittorrent_config:
   downloads:
+  finished_downloads:
   auth_data:

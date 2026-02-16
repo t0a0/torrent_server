@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from .config import (
     get_download_link_secret,
     get_download_link_ttl_seconds,
-    get_downloads_root,
+    get_finished_downloads_root,
     get_hfs_base_url,
 )
 
@@ -44,7 +44,7 @@ class DownloadLinkService:
             signing_secret if signing_secret is not None else get_download_link_secret()
         )
         self._ttl_seconds = ttl_seconds if ttl_seconds is not None else get_download_link_ttl_seconds()
-        self._downloads_root = (downloads_root or get_downloads_root()).resolve()
+        self._downloads_root = (downloads_root or get_finished_downloads_root()).resolve()
 
     def is_configured(self) -> bool:
         """Return whether public HFS base URL is configured."""

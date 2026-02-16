@@ -9,6 +9,7 @@ _QBIT_URL_KEY = "QBITTORRENT_URL"
 _QBIT_USERNAME_KEY = "QBITTORRENT_USERNAME"
 _QBIT_PASSWORD_KEY = "QBITTORRENT_PASSWORD"
 _DOWNLOADS_ROOT_KEY = "DOWNLOADS_ROOT"
+_FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
 _MAX_TORRENT_BYTES_HARD_KEY = "MAX_TORRENT_BYTES_HARD"
 _MAX_TORRENT_BYTES_WARN_KEY = "MAX_TORRENT_BYTES_WARN"
 _MAX_MAGNET_URL_LENGTH_KEY = "MAX_MAGNET_URL_LENGTH"
@@ -45,6 +46,13 @@ def get_downloads_root() -> Path:
     """Resolve local downloads root path used for per-user storage."""
     load_env_file()
     root = os.getenv(_DOWNLOADS_ROOT_KEY, "downloads")
+    return Path(root)
+
+
+def get_finished_downloads_root() -> Path:
+    """Resolve local finished-downloads root path used for per-user storage."""
+    load_env_file()
+    root = os.getenv(_FINISHED_DOWNLOADS_ROOT_KEY, "finished_downloads")
     return Path(root)
 
 
