@@ -34,6 +34,14 @@ class QueuedTorrentStatus:
 
 
 @dataclass(frozen=True)
+class ActiveUserTorrent:
+    """Minimal torrent metadata used by cancel UI flow."""
+
+    hash: str
+    name: str
+
+
+@dataclass(frozen=True)
 class CompletedTorrent:
     """Metadata about one torrent that has finished downloading."""
 
@@ -122,7 +130,6 @@ class TorrentService:
 
     def list_user_queued_torrents(self, user_id: int) -> list[QueuedTorrentStatus]:
         """Return active queued/downloading torrents for a specific user."""
-        user_download_path = self._build_user_download_path(user_id).resolve()
         torrents = self._call_with_auth(self._client.torrents)
         if not isinstance(torrents, list):
             return []
@@ -135,17 +142,11 @@ class TorrentService:
             if self._is_completed_torrent(torrent):
                 continue
 
-            save_path = torrent.get("save_path")
             name = torrent.get("name")
-            if not isinstance(save_path, str) or not isinstance(name, str) or not name:
+            if not isinstance(name, str) or not name:
                 continue
 
-            try:
-                torrent_save_path = Path(save_path).resolve()
-            except OSError:
-                continue
-
-            if torrent_save_path != user_download_path and user_download_path not in torrent_save_path.parents:
+            if not self._is_user_torrent(torrent=torrent, user_id=user_id):
                 continue
 
             progress = torrent.get("progress")
@@ -170,6 +171,62 @@ class TorrentService:
 
         result.sort(key=lambda item: item.name.lower())
         return result
+
+    def list_user_active_torrents(self, user_id: int) -> list[ActiveUserTorrent]:
+        """Return active user torrents with their hashes for cancel flow."""
+        torrents = self._call_with_auth(self._client.torrents)
+        if not isinstance(torrents, list):
+            return []
+
+        result: list[ActiveUserTorrent] = []
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+            if self._is_completed_torrent(torrent):
+                continue
+            if not self._is_user_torrent(torrent=torrent, user_id=user_id):
+                continue
+
+            torrent_hash = torrent.get("hash")
+            torrent_name = torrent.get("name")
+            if not isinstance(torrent_hash, str) or not torrent_hash:
+                continue
+            if not isinstance(torrent_name, str) or not torrent_name:
+                continue
+
+            result.append(ActiveUserTorrent(hash=torrent_hash, name=torrent_name))
+
+        result.sort(key=lambda item: item.name.lower())
+        return result
+
+    def cancel_user_torrent(self, user_id: int, torrent_hash: str) -> bool:
+        """Cancel an active torrent owned by user and remove downloaded files."""
+        normalized_hash = torrent_hash.strip().lower()
+        if not normalized_hash:
+            return False
+
+        torrents = self._call_with_auth(self._client.torrents)
+        if not isinstance(torrents, list):
+            return False
+
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+            if self._is_completed_torrent(torrent):
+                continue
+            if not self._is_user_torrent(torrent=torrent, user_id=user_id):
+                continue
+
+            active_hash = torrent.get("hash")
+            if not isinstance(active_hash, str):
+                continue
+            if active_hash.lower() != normalized_hash:
+                continue
+
+            self._delete_torrent_and_files(active_hash)
+            return True
+
+        return False
 
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""
@@ -235,6 +292,28 @@ class TorrentService:
             self._call_with_auth(self._client.delete, torrent_hash)
             self._logger.info("Deleted completed torrent '%s' to stop seeding", torrent_hash)
 
+    def _delete_torrent_and_files(self, torrent_hash: str) -> None:
+        """Delete a torrent from qBittorrent queue and remove payload files."""
+        if hasattr(self._client, "delete_permanently"):
+            self._call_with_auth(self._client.delete_permanently, torrent_hash)
+            return
+
+        delete_method = self._client.delete
+        try:
+            self._call_with_auth(delete_method, torrent_hash, True)
+            return
+        except TypeError:
+            pass
+
+        for keyword in ("delete_files", "deleteFiles"):
+            try:
+                self._call_with_auth(delete_method, torrent_hash, **{keyword: True})
+                return
+            except TypeError:
+                continue
+
+        self._call_with_auth(delete_method, torrent_hash)
+
     def _notify_torrent_completed(self, torrent: CompletedTorrent) -> None:
         """Call optional completion callback without breaking cleanup loop."""
         if self._on_torrent_completed is None:
@@ -269,6 +348,20 @@ class TorrentService:
             return int(relative_parts[0])
         except ValueError:
             return None
+
+    def _is_user_torrent(self, torrent: dict[str, Any], user_id: int) -> bool:
+        """Check whether torrent save_path belongs to the target Telegram user directory."""
+        save_path = torrent.get("save_path")
+        if not isinstance(save_path, str) or not save_path:
+            return False
+
+        user_download_path = self._build_user_download_path(user_id).resolve()
+        try:
+            torrent_save_path = Path(save_path).resolve()
+        except OSError:
+            return False
+
+        return torrent_save_path == user_download_path or user_download_path in torrent_save_path.parents
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
         """Return True when torrent is in a completed/upload state."""

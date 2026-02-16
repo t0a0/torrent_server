@@ -208,6 +208,7 @@ Notes:
 - `/removeuser <user_id>` (admin only): removes a user from whitelist.
 - `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
 - `/queuedownload`: available only for whitelisted users.
+- `/canceldownload`: available only for whitelisted users; lets the user pick an active torrent and cancel/delete it (including downloaded files).
 - `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `downloads/<user_id>/`.
 
 ## Telegram command menu
@@ -215,7 +216,7 @@ Notes:
 The bot now configures Telegram command menus programmatically at startup:
 
 - Non-whitelisted users see: `/start`, `/authenticate`.
-- Whitelisted users see: `/start`, `/queuedownload`, `/myfolder` (without `/authenticate`).
+- Whitelisted users see: `/start`, `/queuedownload`, `/canceldownload`, `/myfolder` (without `/authenticate`).
 - Owner chat (using `BOT_OWNER_USER_ID`) gets whitelisted commands plus admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
 - Menus are updated dynamically when a user authenticates or is removed from whitelist.
 
