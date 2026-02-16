@@ -180,9 +180,13 @@ async def handle_status(message: Message) -> None:
 
     lines = ["Your active torrents:"]
     for torrent in queued_torrents:
-        lines.append(f"• {torrent.name} — {torrent.progress_percent:.1f}%")
+        torrent_name = escape(torrent.name[:64])
+        torrent_state = escape(torrent.state or "unknown")
+        lines.append(
+            f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
+        )
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("myfolder"))
