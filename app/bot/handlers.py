@@ -44,16 +44,19 @@ auth_service = AuthService(
 
 class _QueueDownloadSessionState:
     def __init__(self) -> None:
-        self._waiting_users: set[int] = set()
+        self._waiting_users: dict[int, str] = {}
 
-    def begin_waiting(self, user_id: int) -> None:
-        self._waiting_users.add(user_id)
+    def begin_waiting(self, user_id: int, command: str) -> None:
+        self._waiting_users[user_id] = command
 
     def is_waiting(self, user_id: int) -> bool:
         return user_id in self._waiting_users
 
+    def get_waiting_command(self, user_id: int) -> str | None:
+        return self._waiting_users.get(user_id)
+
     def clear_waiting(self, user_id: int) -> None:
-        self._waiting_users.discard(user_id)
+        self._waiting_users.pop(user_id, None)
 
 
 queue_download_session_state = _QueueDownloadSessionState()
@@ -112,6 +115,9 @@ class _CompletionNotifier:
 
 completion_notifier = _CompletionNotifier()
 
+
+def _with_cancel_hint(text: str) -> str:
+    return f"{text} You can run /cancel to cancel the current command."
 
 def _build_download_link_service() -> DownloadLinkService | None:
     try:
@@ -199,8 +205,25 @@ async def handle_queuedownload(message: Message) -> None:
         await message.answer("Too many queue requests right now. Please wait a minute and try again.")
         return
 
-    queue_download_session_state.begin_waiting(user_id)
+    queue_download_session_state.begin_waiting(user_id=user_id, command="queuedownload")
     await message.answer("Paste a magnet URL or upload a .torrent file.")
+
+
+@router.message(Command("cancel"))
+async def handle_cancel(message: Message) -> None:
+    actor = _get_actor(message)
+    if actor is None:
+        await message.answer("Cannot resolve caller identity.")
+        return
+
+    user_id, _ = actor
+    waiting_command = queue_download_session_state.get_waiting_command(user_id)
+    if waiting_command is None:
+        await message.answer("There is no pending command input to cancel.")
+        return
+
+    queue_download_session_state.clear_waiting(user_id)
+    await message.answer(f"Cancelled /{waiting_command} input.")
 
 
 @router.message(Command("status"))
@@ -398,7 +421,7 @@ async def handle_queue_download_input(message: Message) -> None:
         await _process_queue_download_magnet_input(message=message, user_id=user_id, text=text)
         return
 
-    await message.answer("Please paste a magnet URL or upload a .torrent file.")
+    await message.answer(_with_cancel_hint("Please paste a magnet URL or upload a .torrent file."))
 
 
 async def _process_queue_download_torrent_upload(message: Message, user_id: int) -> None:
@@ -406,12 +429,12 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
     document = message.document
     original_name = document.file_name or "upload.torrent"
     if not original_name.lower().endswith(".torrent"):
-        await message.answer("Please upload a .torrent file.")
+        await message.answer(_with_cancel_hint("Please upload a .torrent file."))
         queue_download_policy.mark_rejection("torrent_extension")
         return
 
     if document.file_size is not None and document.file_size > get_max_torrent_bytes_hard():
-        await message.answer("Torrent file is too large.")
+        await message.answer(_with_cancel_hint("Torrent file is too large."))
         queue_download_policy.mark_rejection("torrent_size_hard")
         logger.info("/queuedownload rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
         return
@@ -428,7 +451,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
 
         if len(torrent_bytes) > get_max_torrent_bytes_hard():
             queue_download_policy.mark_rejection("torrent_size_hard")
-            await message.answer("Torrent file is too large.")
+            await message.answer(_with_cancel_hint("Torrent file is too large."))
             reason = "torrent_size_hard"
             return
 
@@ -461,7 +484,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
-        await message.answer(exc.user_message)
+        await message.answer(_with_cancel_hint(exc.user_message))
     except TimeoutError:
         reason = "qbit_timeout"
         queue_download_policy.mark_qbit_error()
@@ -515,7 +538,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
-        await message.answer(exc.user_message)
+        await message.answer(_with_cancel_hint(exc.user_message))
     except TimeoutError:
         reason = "qbit_timeout"
         queue_download_policy.mark_qbit_error()
