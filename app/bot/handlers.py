@@ -8,9 +8,9 @@ import logging
 import secrets
 import time
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
@@ -119,6 +119,26 @@ completion_notifier = _CompletionNotifier()
 def _with_cancel_hint(text: str) -> str:
     return f"{text} You can run /cancel to cancel the current command."
 
+def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
+    if torrent_service is None:
+        return None
+
+    active_torrents = torrent_service.list_user_queued_torrents(user_id)
+    if not active_torrents:
+        return None
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=torrent.name[:64],
+                callback_data=f"cancel_torrent:{torrent.hash}",
+            )
+        ]
+        for torrent in active_torrents
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _build_download_link_service() -> DownloadLinkService | None:
     try:
         return DownloadLinkService()
@@ -224,6 +244,93 @@ async def handle_cancel(message: Message) -> None:
 
     queue_download_session_state.clear_waiting(user_id)
     await message.answer(f"Cancelled /{waiting_command} input.")
+
+
+@router.message(Command("canceldownload"))
+async def handle_cancel_download(message: Message) -> None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
+        return
+
+    if torrent_service is None:
+        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        return
+
+    user_id, _ = actor
+    try:
+        keyboard = await asyncio.wait_for(
+            asyncio.to_thread(_build_cancel_download_keyboard, user_id),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+    except TimeoutError:
+        await message.answer(_map_qbit_user_message("qbit_timeout"))
+        return
+    except Exception as exc:
+        reason = _map_qbit_error(exc)
+        await message.answer(_map_qbit_user_message(reason))
+        return
+
+    if keyboard is None:
+        await message.answer("You have no active downloads to cancel.")
+        return
+
+    await message.answer("Select a download to cancel and delete:", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("cancel_torrent:"))
+async def handle_cancel_torrent_click(callback_query: CallbackQuery) -> None:
+    message = callback_query.message
+    actor = callback_query.from_user
+    if message is None or actor is None:
+        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+        return
+
+    if not auth_service.is_whitelisted(actor.id):
+        await callback_query.answer("You are not authenticated.", show_alert=True)
+        return
+
+    if torrent_service is None:
+        await callback_query.answer("Torrent service unavailable.", show_alert=True)
+        return
+
+    callback_data = callback_query.data or ""
+    torrent_hash = callback_data.partition(":")[2].strip()
+    if not torrent_hash:
+        await callback_query.answer("Invalid torrent selection.", show_alert=True)
+        return
+
+    try:
+        cancelled = await asyncio.wait_for(
+            asyncio.to_thread(torrent_service.cancel_user_torrent, actor.id, torrent_hash),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+    except TimeoutError:
+        await callback_query.answer(_map_qbit_user_message("qbit_timeout"), show_alert=True)
+        return
+    except Exception as exc:
+        reason = _map_qbit_error(exc)
+        await callback_query.answer(_map_qbit_user_message(reason), show_alert=True)
+        return
+
+    if not cancelled:
+        await callback_query.answer("Download is no longer active.", show_alert=True)
+        return
+
+    await callback_query.answer("Download cancelled.")
+
+    try:
+        keyboard = await asyncio.wait_for(
+            asyncio.to_thread(_build_cancel_download_keyboard, actor.id),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+    except Exception:
+        keyboard = None
+
+    if keyboard is None:
+        await message.edit_text("No active downloads left to cancel.")
+        return
+
+    await message.edit_text("Select a download to cancel and delete:", reply_markup=keyboard)
 
 
 @router.message(Command("status"))
