@@ -6,6 +6,7 @@ import asyncio
 from html import escape
 import logging
 import secrets
+import shlex
 import time
 
 from aiogram import Bot, F, Router
@@ -125,12 +126,21 @@ class _CompletionNotifier:
                 if not path_part.endswith("/"):
                     content_link = f"{path_part}/?{query_part}"
 
-            wget_script = (
-                "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
-                '--reject "index.html*" "'
-                f"{content_link}"
-                '"'
-            )
+            if torrent.content_path is not None and not torrent.content_is_directory:
+                quoted_output_name = shlex.quote(torrent.content_path.name)
+                quoted_content_link = shlex.quote(content_link)
+                wget_script = (
+                    "wget --no-host-directories "
+                    f"--output-document {quoted_output_name} "
+                    f"{quoted_content_link}"
+                )
+            else:
+                wget_script = (
+                    "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+                    '--reject "index.html*" "'
+                    f"{content_link}"
+                    '"'
+                )
             text = (
                 f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
                 "Run this wget script:\n"
