@@ -16,7 +16,7 @@ from qbittorrent.client import LoginRequired
 
 from .config import (
     get_active_downloads_root,
-    get_downloads_root,
+    get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
     get_qbittorrent_username,
@@ -63,14 +63,14 @@ class TorrentService:
         qbittorrent_url: str | None = None,
         qbittorrent_username: str | None = None,
         qbittorrent_password: str | None = None,
-        downloads_root: Path | None = None,
+        finished_downloads_root: Path | None = None,
         active_downloads_root: Path | None = None,
         completion_poll_interval_seconds: float = 30.0,
         on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
-        self._downloads_root = (downloads_root or get_downloads_root()).resolve()
+        self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
         self._active_downloads_root = (active_downloads_root or get_active_downloads_root()).resolve()
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
         self._username = (
@@ -343,7 +343,7 @@ class TorrentService:
         if completed_content_path is None or user_id is None:
             return completed_content_path
 
-        destination_user_root = (self._downloads_root / str(user_id)).resolve()
+        destination_user_root = (self._finished_downloads_root / str(user_id)).resolve()
         destination_user_root.mkdir(parents=True, exist_ok=True)
 
         destination_path = destination_user_root / completed_content_path.name

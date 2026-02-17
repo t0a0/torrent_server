@@ -14,7 +14,7 @@ from urllib.parse import quote, urlencode
 from .config import (
     get_download_link_secret,
     get_download_link_ttl_seconds,
-    get_downloads_root,
+    get_finished_downloads_root,
     get_hfs_base_url,
 )
 
@@ -37,14 +37,14 @@ class DownloadLinkService:
         hfs_base_url: str | None = None,
         signing_secret: str | None = None,
         ttl_seconds: int | None = None,
-        downloads_root: Path | None = None,
+        finished_downloads_root: Path | None = None,
     ) -> None:
         self._hfs_base_url = hfs_base_url if hfs_base_url is not None else get_hfs_base_url()
         self._signing_secret = (
             signing_secret if signing_secret is not None else get_download_link_secret()
         )
         self._ttl_seconds = ttl_seconds if ttl_seconds is not None else get_download_link_ttl_seconds()
-        self._downloads_root = (downloads_root or get_downloads_root()).resolve()
+        self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
 
     def is_configured(self) -> bool:
         """Return whether public HFS base URL is configured."""
@@ -91,8 +91,8 @@ class DownloadLinkService:
 
     def resolve_user_folder(self, user_id: int) -> Path:
         """Resolve and return the only permitted folder for a Telegram user id."""
-        user_root = (self._downloads_root / str(user_id)).resolve()
-        if self._downloads_root not in user_root.parents and user_root != self._downloads_root:
+        user_root = (self._finished_downloads_root / str(user_id)).resolve()
+        if self._finished_downloads_root not in user_root.parents and user_root != self._finished_downloads_root:
             raise ValueError("Resolved user folder is outside of downloads root")
         return user_root
 

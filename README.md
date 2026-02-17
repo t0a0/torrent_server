@@ -64,7 +64,7 @@ QBITTORRENT_URL=http://127.0.0.1:8080
 QBITTORRENT_USERNAME=<your_webui_username>
 QBITTORRENT_PASSWORD=<your_webui_password>
 ACTIVE_DOWNLOADS_ROOT=active_downloads
-DOWNLOADS_ROOT=finished_downloads
+FINISHED_DOWNLOADS_ROOT=finished_downloads
 QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
@@ -119,7 +119,7 @@ For Docker Compose deployments, set:
 
 ```env
 ACTIVE_DOWNLOADS_ROOT=/downloads/active_downloads
-DOWNLOADS_ROOT=/downloads/finished_downloads
+FINISHED_DOWNLOADS_ROOT=/downloads/finished_downloads
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -248,7 +248,7 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 - `start_download_from_file_bytes(user_id, torrent_file_bytes)`
 - `start_download_from_magnet_url(user_id, magnet_url)`
 
-Both methods queue payloads into `ACTIVE_DOWNLOADS_ROOT/<user_id>/...` and move completed files into `DOWNLOADS_ROOT/<user_id>/...`.
+Both methods queue payloads into `ACTIVE_DOWNLOADS_ROOT/<user_id>/...` and move completed files into `FINISHED_DOWNLOADS_ROOT/<user_id>/...`.
 
 The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
 
@@ -257,7 +257,7 @@ The service also runs a background cleanup loop that automatically removes compl
 
 - `/queuedownload` now starts an input session and prompts user to paste a magnet URL or upload a `.torrent` file.
 - Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
-- Valid payloads are queued via qBittorrent into `ACTIVE_DOWNLOADS_ROOT/<telegram_user_id>/` and served from `DOWNLOADS_ROOT/<telegram_user_id>/` after completion.
+- Valid payloads are queued via qBittorrent into `ACTIVE_DOWNLOADS_ROOT/<telegram_user_id>/` and served from `FINISHED_DOWNLOADS_ROOT/<telegram_user_id>/` after completion.
 - Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
 
 ## `/status` live progress behavior
