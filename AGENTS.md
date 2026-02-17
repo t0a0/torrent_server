@@ -14,6 +14,7 @@ Primary stack and constraints:
 - Unless explicitly asked to implement/code, operate in **Q/A mode** (no file modifications).
 - No tests are required by default unless explicitly requested.
 - Avoid module-level cached variables for simple configuration getter calls; prefer calling small config functions at usage sites unless caching is required for correctness/performance.
+- For user-facing torrent name display, always use the final display name truncated to the first 64 characters.
 
 ## Product roadmap context
 

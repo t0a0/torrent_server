@@ -66,6 +66,10 @@ queue_download_policy = QueueDownloadPolicyService(
 )
 
 
+def _get_user_display_torrent_name(name: str | None) -> str:
+    return (name or "(unnamed torrent)")[:64]
+
+
 class _CompletionNotifier:
     def __init__(self) -> None:
         self._bot: Bot | None = None
@@ -123,7 +127,7 @@ class _CompletionNotifier:
         assert self._bot is not None
         assert torrent.user_id is not None
 
-        torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
+        torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         text = f"✅ Download finished: <b>{torrent_name}</b>"
         if download_link_service is not None and download_link_service.is_configured():
             content_link: str | None = None
@@ -183,7 +187,7 @@ class _CompletionNotifier:
         assert self._bot is not None
         assert torrent.user_id is not None
 
-        torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
+        torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         error_state = escape(torrent.state or "unknown")
         await self._bot.send_message(
             chat_id=torrent.user_id,
@@ -213,7 +217,7 @@ def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None
     rows = [
         [
             InlineKeyboardButton(
-                text=torrent.name[:64],
+                text=_get_user_display_torrent_name(torrent.name),
                 callback_data=f"cancel_torrent:{torrent.hash}",
             )
         ]
@@ -452,7 +456,7 @@ async def handle_status(message: Message) -> None:
 
     lines = ["Your active torrents:"]
     for torrent in queued_torrents:
-        torrent_name = escape(torrent.name[:64])
+        torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         torrent_state = escape(torrent.state or "unknown")
         lines.append(
             f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
