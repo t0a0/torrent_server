@@ -41,6 +41,7 @@ class CompletedTorrent:
     hash: str
     name: str | None
     user_id: int | None
+    content_path: Path | None
 
 
 class TorrentService:
@@ -244,6 +245,7 @@ class TorrentService:
                 hash=torrent_hash,
                 name=torrent_name,
                 user_id=self._extract_user_id_from_torrent(torrent),
+                content_path=self._extract_completed_content_path(torrent),
             )
             self._notify_torrent_completed(completed_torrent)
 
@@ -320,6 +322,42 @@ class TorrentService:
             return False
 
         return torrent_save_path == user_download_path or user_download_path in torrent_save_path.parents
+
+    def _extract_completed_content_path(self, torrent: dict[str, Any]) -> Path | None:
+        """Resolve completed payload path for one torrent within the user folder."""
+        user_id = self._extract_user_id_from_torrent(torrent)
+        if user_id is None:
+            return None
+
+        user_download_path = self._build_user_download_path(user_id).resolve()
+        save_path = torrent.get("save_path") if isinstance(torrent.get("save_path"), str) else None
+        name = torrent.get("name") if isinstance(torrent.get("name"), str) else None
+        content_path = torrent.get("content_path") if isinstance(torrent.get("content_path"), str) else None
+
+        candidates: list[Path] = []
+        if content_path:
+            content_path_obj = Path(content_path)
+            if content_path_obj.is_absolute():
+                candidates.append(content_path_obj)
+            elif save_path:
+                candidates.append(Path(save_path) / content_path_obj)
+
+        if save_path and name:
+            candidates.append(Path(save_path) / name)
+
+        for candidate in candidates:
+            try:
+                resolved_candidate = candidate.resolve()
+            except OSError:
+                continue
+
+            if (
+                resolved_candidate == user_download_path
+                or user_download_path in resolved_candidate.parents
+            ):
+                return resolved_candidate
+
+        return None
 
     def _is_completed_torrent(self, torrent: dict[str, Any]) -> bool:
         """Return True when torrent is in a completed/upload state."""

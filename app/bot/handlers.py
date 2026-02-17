@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 from html import escape
 import logging
+from pathlib import Path
 import secrets
 import time
+from urllib.parse import quote
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
@@ -106,11 +108,50 @@ class _CompletionNotifier:
             folder_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
             text = f"{text}\n\nYour download folder link:\n{folder_link}"
 
+            completed_path_link = _build_completed_path_link(
+                folder_link=folder_link,
+                user_id=torrent.user_id,
+                content_path=torrent.content_path,
+            )
+            if completed_path_link is not None:
+                wget_script = _build_wget_script(completed_path_link)
+                text = (
+                    f"{text}\n\n"
+                    "Run this script to download the completed file/folder:\n"
+                    f"<code>{escape(wget_script)}</code>"
+                )
+
         await self._bot.send_message(
             chat_id=torrent.user_id,
             text=text,
             parse_mode="HTML",
         )
+
+
+def _build_completed_path_link(folder_link: str, user_id: int, content_path: Path | None) -> str | None:
+    if content_path is None:
+        return None
+
+    path_parts = content_path.parts
+    user_prefix = str(user_id)
+    if not path_parts or path_parts[0] != "/" or len(path_parts) < 3 or path_parts[1] != user_prefix:
+        return None
+
+    relative_path = "/".join(quote(part, safe="") for part in path_parts[2:])
+    base, _, query = folder_link.partition("?")
+    base_url = base.rstrip("/")
+    if not base_url.endswith(f"/{user_prefix}"):
+        return None
+
+    completed_url = f"{base_url}/{relative_path}"
+    if query:
+        return f"{completed_url}?{query}"
+    return completed_url
+
+
+def _build_wget_script(download_url: str) -> str:
+    quoted_url = quote(download_url, safe=":/?&=%.-_~+#")
+    return f"wget --recursive --no-parent --continue '{quoted_url}'"
 
 
 completion_notifier = _CompletionNotifier()
