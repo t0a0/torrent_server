@@ -7,6 +7,7 @@ from html import escape
 import logging
 import secrets
 import time
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
@@ -104,7 +105,16 @@ class _CompletionNotifier:
         text = f"✅ Download finished: <b>{torrent_name}</b>"
         if download_link_service is not None and download_link_service.is_configured():
             folder_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
-            text = f"{text}\n\nYour download folder link:\n{folder_link}"
+            torrent_item_link = _build_torrent_item_link(folder_link, torrent.name)
+            wget_command = (
+                "wget --recursive --no-parent --no-host-directories "
+                f'--content-disposition "{torrent_item_link}"'
+            )
+            text = (
+                f"{text}\n\nYour download folder link:\n{folder_link}"
+                f"\n\nDirect link for this completed torrent:\n{torrent_item_link}"
+                f"\n\nRun this command to download it with wget:\n<pre>{escape(wget_command)}</pre>"
+            )
 
         await self._bot.send_message(
             chat_id=torrent.user_id,
@@ -118,6 +128,18 @@ completion_notifier = _CompletionNotifier()
 
 def _with_cancel_hint(text: str) -> str:
     return f"{text} You can run /cancel to cancel the current command."
+
+
+def _build_torrent_item_link(folder_link: str, torrent_name: str | None) -> str:
+    """Build a signed link to the completed torrent item under the user directory."""
+    if not torrent_name:
+        return folder_link
+
+    parsed = urlsplit(folder_link)
+    normalized_path = parsed.path.rstrip("/")
+    item_path = quote(torrent_name.strip("/"), safe="")
+    return urlunsplit(parsed._replace(path=f"{normalized_path}/{item_path}"))
+
 
 def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
     if torrent_service is None:
