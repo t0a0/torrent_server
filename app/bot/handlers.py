@@ -85,7 +85,7 @@ class _CompletionNotifier:
             return
 
         future = asyncio.run_coroutine_threadsafe(
-            self._send_completion_message(torrent),
+            self._send_download_completion_message(torrent),
             self._loop,
         )
 
@@ -97,7 +97,7 @@ class _CompletionNotifier:
 
         future.add_done_callback(_handle_result)
 
-    async def _send_completion_message(self, torrent: CompletedTorrent) -> None:
+    async def _send_download_completion_message(self, torrent: CompletedTorrent) -> None:
         assert self._bot is not None
         assert torrent.user_id is not None
 
@@ -143,7 +143,7 @@ class _CompletionNotifier:
                 )
             text = (
                 f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
-                "Run this wget script:\n"
+                "Run this wget script (it downloads files into your current terminal folder):\n"
                 f"<pre>{escape(wget_script)}</pre>"
             )
 
