@@ -661,6 +661,17 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         )
         infohash = validation.infohash
 
+        is_duplicate = await asyncio.wait_for(
+            asyncio.to_thread(torrent_service.is_torrent_already_queued, infohash),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+        if is_duplicate:
+            reason = "duplicate"
+            queue_download_policy.mark_rejection("duplicate")
+            queue_download_session_state.clear_waiting(user_id)
+            await message.answer("This torrent is already queued.")
+            return
+
         started_at = time.monotonic()
         await asyncio.wait_for(
             asyncio.to_thread(
@@ -713,6 +724,17 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
         if torrent_service is None:
             reason = "service_unavailable"
             await message.answer("Torrent service is currently unavailable. Please contact admin.")
+            return
+
+        is_duplicate = await asyncio.wait_for(
+            asyncio.to_thread(torrent_service.is_torrent_already_queued, infohash),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+        if is_duplicate:
+            reason = "duplicate"
+            queue_download_policy.mark_rejection("duplicate")
+            queue_download_session_state.clear_waiting(user_id)
+            await message.answer("This torrent is already queued.")
             return
 
         started_at = time.monotonic()
