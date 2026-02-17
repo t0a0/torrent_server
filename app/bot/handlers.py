@@ -631,7 +631,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Download queued successfully. You'll receive a message once the download completes.\\n\\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
+        await message.answer("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
@@ -685,7 +685,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Download queued successfully. You'll receive a message once the download completes.\\n\\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
+        await message.answer("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
