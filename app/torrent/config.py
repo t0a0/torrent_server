@@ -8,7 +8,8 @@ from app.config import load_env_file
 _QBIT_URL_KEY = "QBITTORRENT_URL"
 _QBIT_USERNAME_KEY = "QBITTORRENT_USERNAME"
 _QBIT_PASSWORD_KEY = "QBITTORRENT_PASSWORD"
-_DOWNLOADS_ROOT_KEY = "DOWNLOADS_ROOT"
+_ACTIVE_DOWNLOADS_ROOT_KEY = "ACTIVE_DOWNLOADS_ROOT"
+_FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
 _MAX_TORRENT_BYTES_HARD_KEY = "MAX_TORRENT_BYTES_HARD"
 _MAX_TORRENT_BYTES_WARN_KEY = "MAX_TORRENT_BYTES_WARN"
 _MAX_MAGNET_URL_LENGTH_KEY = "MAX_MAGNET_URL_LENGTH"
@@ -41,10 +42,17 @@ def get_qbittorrent_password() -> str | None:
     return os.getenv(_QBIT_PASSWORD_KEY)
 
 
-def get_downloads_root() -> Path:
+def get_finished_downloads_root() -> Path:
     """Resolve local downloads root path used for per-user storage."""
     load_env_file()
-    root = os.getenv(_DOWNLOADS_ROOT_KEY, "downloads")
+    root = os.getenv(_FINISHED_DOWNLOADS_ROOT_KEY, "finished_downloads")
+    return Path(root)
+
+
+def get_active_downloads_root() -> Path:
+    """Resolve local active-downloads root path used for qBittorrent save paths."""
+    load_env_file()
+    root = os.getenv(_ACTIVE_DOWNLOADS_ROOT_KEY, "active_downloads")
     return Path(root)
 
 

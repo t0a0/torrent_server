@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 import time
 from dataclasses import dataclass
@@ -14,7 +15,8 @@ from qbittorrent import Client
 from qbittorrent.client import LoginRequired
 
 from .config import (
-    get_downloads_root,
+    get_active_downloads_root,
+    get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
     get_qbittorrent_username,
@@ -61,13 +63,15 @@ class TorrentService:
         qbittorrent_url: str | None = None,
         qbittorrent_username: str | None = None,
         qbittorrent_password: str | None = None,
-        downloads_root: Path | None = None,
+        finished_downloads_root: Path | None = None,
+        active_downloads_root: Path | None = None,
         completion_poll_interval_seconds: float = 30.0,
         on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
-        self._downloads_root = downloads_root or get_downloads_root()
+        self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
+        self._active_downloads_root = (active_downloads_root or get_active_downloads_root()).resolve()
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
         self._username = (
             qbittorrent_username if qbittorrent_username is not None else get_qbittorrent_username()
@@ -96,17 +100,11 @@ class TorrentService:
         )
 
     def _build_user_download_path(self, user_id: int) -> Path:
-        """Return `downloads/<user_id>` path and avoid creating root-owned directories.
-
-        In Docker deployments, the bot and qBittorrent usually run as different users.
-        If the bot eagerly creates `downloads/<user_id>`, qBittorrent can fail writing
-        payload files with `Permission denied` because it does not own that directory.
-        We therefore pass the path to qBittorrent without creating it here.
-        """
-        return self._downloads_root / str(user_id)
+        """Return `active_downloads/<user_id>` path without eagerly creating folders."""
+        return self._active_downloads_root / str(user_id)
 
     def start_download_from_file_bytes(self, user_id: int, torrent_file_bytes: bytes) -> None:
-        """Queue torrent file bytes for download into `downloads/<user_id>` directory."""
+        """Queue torrent file bytes for download into `active_downloads/<user_id>`."""
         if not torrent_file_bytes:
             raise ValueError("torrent_file_bytes must not be empty")
 
@@ -115,7 +113,7 @@ class TorrentService:
         self._call_with_auth(self._client.download_from_file, file_buffer, savepath=str(save_path))
 
     def start_download_from_magnet_url(self, user_id: int, magnet_url: str) -> None:
-        """Queue magnet link for download into `downloads/<user_id>` directory."""
+        """Queue magnet link for download into `active_downloads/<user_id>`."""
         magnet = magnet_url.strip()
         if not magnet.startswith("magnet:"):
             raise ValueError("magnet_url must start with 'magnet:'")
@@ -242,13 +240,18 @@ class TorrentService:
                 continue
 
             torrent_name = torrent.get("name") if isinstance(torrent.get("name"), str) else None
+            completed_torrent_user_id = self._extract_user_id_from_torrent(torrent)
             completed_content_path = self._extract_completed_content_path(torrent)
+            moved_content_path = self._move_completed_payload_to_downloads(
+                completed_content_path=completed_content_path,
+                user_id=completed_torrent_user_id,
+            )
             completed_torrent = CompletedTorrent(
                 hash=torrent_hash,
                 name=torrent_name,
-                user_id=self._extract_user_id_from_torrent(torrent),
-                content_path=completed_content_path,
-                content_is_directory=completed_content_path.is_dir() if completed_content_path is not None else False,
+                user_id=completed_torrent_user_id,
+                content_path=moved_content_path,
+                content_is_directory=moved_content_path.is_dir() if moved_content_path is not None else False,
             )
             self._notify_torrent_completed(completed_torrent)
 
@@ -288,7 +291,7 @@ class TorrentService:
             self._logger.exception("Failed to process completed torrent notification")
 
     def _extract_user_id_from_torrent(self, torrent: dict[str, Any]) -> int | None:
-        """Infer Telegram user id from qBittorrent save path rooted at downloads dir."""
+        """Infer Telegram user id from qBittorrent save path rooted at active downloads dir."""
         save_path = torrent.get("save_path")
         if not isinstance(save_path, str) or not save_path:
             return None
@@ -298,12 +301,12 @@ class TorrentService:
         except OSError:
             return None
 
-        if resolved_save_path == self._downloads_root:
+        if resolved_save_path == self._active_downloads_root:
             return None
-        if self._downloads_root not in resolved_save_path.parents:
+        if self._active_downloads_root not in resolved_save_path.parents:
             return None
 
-        relative_parts = resolved_save_path.relative_to(self._downloads_root).parts
+        relative_parts = resolved_save_path.relative_to(self._active_downloads_root).parts
         if not relative_parts:
             return None
 
@@ -323,16 +326,45 @@ class TorrentService:
         except OSError:
             return None
 
-        if resolved_content_path == self._downloads_root:
+        if resolved_content_path == self._active_downloads_root:
             return None
-        if self._downloads_root not in resolved_content_path.parents:
+        if self._active_downloads_root not in resolved_content_path.parents:
             return None
 
         return resolved_content_path
 
 
+    def _move_completed_payload_to_downloads(
+        self,
+        completed_content_path: Path | None,
+        user_id: int | None,
+    ) -> Path | None:
+        """Move completed payload from active root into finished downloads root."""
+        if completed_content_path is None or user_id is None:
+            return completed_content_path
+
+        destination_user_root = (self._finished_downloads_root / str(user_id)).resolve()
+        destination_user_root.mkdir(parents=True, exist_ok=True)
+
+        destination_path = destination_user_root / completed_content_path.name
+        if destination_path.exists():
+            destination_path = destination_user_root / f"{int(time.time())}_{completed_content_path.name}"
+
+        try:
+            moved_path = Path(shutil.move(str(completed_content_path), str(destination_path))).resolve()
+        except (OSError, shutil.Error):
+            self._logger.exception(
+                "Failed to move completed payload '%s' to '%s'",
+                completed_content_path,
+                destination_path,
+            )
+            return completed_content_path
+
+        return moved_path
+
+
     def _is_user_torrent(self, torrent: dict[str, Any], user_id: int) -> bool:
-        """Check whether torrent save_path belongs to the target Telegram user directory."""
+        """Check whether torrent save_path belongs to target user under active root."""
         save_path = torrent.get("save_path")
         if not isinstance(save_path, str) or not save_path:
             return False
