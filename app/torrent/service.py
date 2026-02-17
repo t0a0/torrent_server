@@ -41,6 +41,8 @@ class CompletedTorrent:
     hash: str
     name: str | None
     user_id: int | None
+    content_path: Path | None
+    content_is_directory: bool
 
 
 class TorrentService:
@@ -240,10 +242,13 @@ class TorrentService:
                 continue
 
             torrent_name = torrent.get("name") if isinstance(torrent.get("name"), str) else None
+            completed_content_path = self._extract_completed_content_path(torrent)
             completed_torrent = CompletedTorrent(
                 hash=torrent_hash,
                 name=torrent_name,
                 user_id=self._extract_user_id_from_torrent(torrent),
+                content_path=completed_content_path,
+                content_is_directory=completed_content_path.is_dir() if completed_content_path is not None else False,
             )
             self._notify_torrent_completed(completed_torrent)
 
@@ -306,6 +311,25 @@ class TorrentService:
             return int(relative_parts[0])
         except ValueError:
             return None
+
+    def _extract_completed_content_path(self, torrent: dict[str, Any]) -> Path | None:
+        """Resolve finished payload path from qBittorrent `content_path` when available."""
+        content_path = torrent.get("content_path")
+        if not isinstance(content_path, str) or not content_path:
+            return None
+
+        try:
+            resolved_content_path = Path(content_path).resolve()
+        except OSError:
+            return None
+
+        if resolved_content_path == self._downloads_root:
+            return None
+        if self._downloads_root not in resolved_content_path.parents:
+            return None
+
+        return resolved_content_path
+
 
     def _is_user_torrent(self, torrent: dict[str, Any], user_id: int) -> bool:
         """Check whether torrent save_path belongs to the target Telegram user directory."""

@@ -6,6 +6,7 @@ import asyncio
 from html import escape
 import logging
 import secrets
+import shlex
 import time
 
 from aiogram import Bot, F, Router
@@ -84,7 +85,7 @@ class _CompletionNotifier:
             return
 
         future = asyncio.run_coroutine_threadsafe(
-            self._send_completion_message(torrent),
+            self._send_download_completion_message(torrent),
             self._loop,
         )
 
@@ -96,15 +97,58 @@ class _CompletionNotifier:
 
         future.add_done_callback(_handle_result)
 
-    async def _send_completion_message(self, torrent: CompletedTorrent) -> None:
+    async def _send_download_completion_message(self, torrent: CompletedTorrent) -> None:
         assert self._bot is not None
         assert torrent.user_id is not None
 
         torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
         text = f"✅ Download finished: <b>{torrent_name}</b>"
         if download_link_service is not None and download_link_service.is_configured():
-            folder_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
-            text = f"{text}\n\nYour download folder link:\n{folder_link}"
+            content_link: str | None = None
+            if torrent.content_path is not None:
+                try:
+                    content_link = download_link_service.build_user_content_link(
+                        user_id=torrent.user_id,
+                        content_path=torrent.content_path,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Failed to build content link for completed torrent hash=%s path=%s",
+                        torrent.hash,
+                        torrent.content_path,
+                    )
+
+            if content_link is None:
+                content_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
+
+            if torrent.content_is_directory and "?" in content_link:
+                path_part, query_part = content_link.split("?", maxsplit=1)
+                if not path_part.endswith("/"):
+                    content_link = f"{path_part}/?{query_part}"
+
+            if torrent.content_path is not None and not torrent.content_is_directory:
+                quoted_output_name = shlex.quote(torrent.content_path.name)
+                quoted_content_link = shlex.quote(content_link)
+                wget_script = (
+                    "wget --no-host-directories "
+                    f"--output-document {quoted_output_name} "
+                    f"{quoted_content_link}"
+                )
+            else:
+                wget_script = (
+                    "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+                    '--reject "index.html*" "'
+                    f"{content_link}"
+                    '"'
+                )
+            text = (
+                f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
+                "Alternatively, you can download it via terminal. "
+                "Run this wget script (it downloads files into your current terminal folder):\n"
+                f"<pre>{escape(wget_script)}</pre>\n\n"
+                "If you are on Windows, run this first in PowerShell:\n"
+                "<pre>wsl\nsudo apt update\nsudo apt install wget</pre>"
+            )
 
         await self._bot.send_message(
             chat_id=torrent.user_id,
@@ -587,7 +631,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Torrent accepted and queued for download.")
+        await message.answer("Download queued successfully. You'll receive a message once the download completes.\\n\\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
@@ -641,7 +685,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Magnet accepted and queued for download.")
+        await message.answer("Download queued successfully. You'll receive a message once the download completes.\\n\\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
