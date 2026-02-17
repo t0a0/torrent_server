@@ -202,6 +202,29 @@ class TorrentService:
 
         return False
 
+    def is_torrent_already_queued(self, infohash: str) -> bool:
+        """Return True when a torrent with the provided infohash already exists in qBittorrent."""
+        normalized_hash = infohash.strip().lower()
+        if not normalized_hash:
+            return False
+
+        torrents = self._call_with_auth(self._client.torrents)
+        if not isinstance(torrents, list):
+            return False
+
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+
+            torrent_hash = torrent.get("hash")
+            if not isinstance(torrent_hash, str):
+                continue
+
+            if torrent_hash.strip().lower() == normalized_hash:
+                return True
+
+        return False
+
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""
         if not self._username or not self._password:
