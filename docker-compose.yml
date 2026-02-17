@@ -10,9 +10,11 @@ services:
       - file-server
     volumes:
       - downloads:/downloads
+      - activedownloads:/activedownloads
       - auth_data:/auth
     environment:
       DOWNLOADS_ROOT: /downloads
+      ACTIVE_DOWNLOADS_ROOT: /activedownloads
       QBITTORRENT_URL: http://qbittorrent:8080
       AUTH_DB_PATH: /auth/auth.db
     develop:
@@ -38,6 +40,7 @@ services:
     volumes:
       - qbittorrent_config:/config
       - downloads:/downloads
+      - activedownloads:/activedownloads
     restart: unless-stopped
 
   file-server:
@@ -56,4 +59,5 @@ services:
 volumes:
   qbittorrent_config:
   downloads:
+  activedownloads:
   auth_data:

@@ -22,6 +22,7 @@ _QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
 _QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY = "QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC"
+_ACTIVE_DOWNLOADS_ROOT_KEY = "ACTIVE_DOWNLOADS_ROOT"
 
 def get_qbittorrent_url() -> str:
     """Resolve qBittorrent Web UI URL from environment."""
@@ -111,3 +112,10 @@ def get_qbit_api_timeout_seconds() -> int:
 
 def get_qbit_global_upload_limit_bytes_per_sec() -> int:
     return _get_int_env(_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY, 1024 * 1024)
+
+
+def get_active_downloads_root() -> Path:
+    """Resolve local active downloads root path used while torrents are in progress."""
+    load_env_file()
+    root = os.getenv(_ACTIVE_DOWNLOADS_ROOT_KEY, "activedownloads")
+    return Path(root)
