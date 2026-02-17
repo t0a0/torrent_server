@@ -14,8 +14,10 @@ from typing import Any, Callable
 from qbittorrent import Client
 from qbittorrent.client import LoginRequired
 
+from .completed_store import CompletedDownloadStore
 from .config import (
     get_active_downloads_root,
+    get_completed_downloads_db_path,
     get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
@@ -96,6 +98,7 @@ class TorrentService:
         )
         self._on_torrent_completed = on_torrent_completed
         self._on_torrent_failed = on_torrent_failed
+        self._completed_store = CompletedDownloadStore(get_completed_downloads_db_path())
 
         self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
@@ -225,6 +228,37 @@ class TorrentService:
 
         return False
 
+    def find_user_completed_download(self, user_id: int, infohash: str):
+        """Return a completed record for user+infohash if present."""
+        normalized_hash = infohash.strip().lower()
+        if not normalized_hash:
+            return None
+        return self._completed_store.find_completed(infohash=normalized_hash, user_id=user_id)
+
+    def delete_user_completed_download(self, user_id: int, infohash: str) -> None:
+        """Delete a completed record for user+infohash."""
+        normalized_hash = infohash.strip().lower()
+        if not normalized_hash:
+            return
+        self._completed_store.delete_completed(infohash=normalized_hash, user_id=user_id)
+
+    def resolve_user_finished_content_path(self, user_id: int, content_path: str) -> Path | None:
+        """Resolve a stored relative content path under finished_downloads/<user_id>."""
+        user_root = (self._finished_downloads_root / str(user_id)).resolve()
+        candidate_relative_path = Path(content_path)
+        if candidate_relative_path.is_absolute():
+            return None
+
+        try:
+            resolved_candidate_path = (user_root / candidate_relative_path).resolve()
+        except OSError:
+            return None
+
+        if resolved_candidate_path != user_root and user_root not in resolved_candidate_path.parents:
+            return None
+
+        return resolved_candidate_path
+
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials."""
         if not self._username or not self._password:
@@ -305,6 +339,19 @@ class TorrentService:
                 completed_content_path=completed_content_path,
                 user_id=completed_torrent_user_id,
             )
+            if completed_torrent_user_id is not None and moved_content_path is not None:
+                relative_content_path = self._to_user_relative_finished_path(
+                    user_id=completed_torrent_user_id,
+                    absolute_path=moved_content_path,
+                )
+                if relative_content_path is not None:
+                    self._completed_store.upsert_completed(
+                        infohash=torrent_hash.strip().lower(),
+                        user_id=completed_torrent_user_id,
+                        content_path=relative_content_path.as_posix(),
+                        torrent_name=torrent_name,
+                    )
+
             completed_torrent = CompletedTorrent(
                 hash=torrent_hash,
                 name=torrent_name,
@@ -430,6 +477,22 @@ class TorrentService:
             return completed_content_path
 
         return moved_path
+
+
+    def _to_user_relative_finished_path(self, user_id: int, absolute_path: Path) -> Path | None:
+        user_root = (self._finished_downloads_root / str(user_id)).resolve()
+        try:
+            resolved_absolute_path = absolute_path.resolve()
+        except OSError:
+            return None
+
+        if resolved_absolute_path != user_root and user_root not in resolved_absolute_path.parents:
+            return None
+
+        try:
+            return resolved_absolute_path.relative_to(user_root)
+        except ValueError:
+            return None
 
 
     def _is_user_torrent(self, torrent: dict[str, Any], user_id: int) -> bool:

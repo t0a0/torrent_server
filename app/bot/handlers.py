@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from html import escape
 import logging
+from pathlib import Path
 import secrets
 import shlex
 import time
@@ -152,13 +153,11 @@ class _CompletionNotifier:
                 if not path_part.endswith("/"):
                     content_link = f"{path_part}/?{query_part}"
 
-            if torrent.content_path is not None and not torrent.content_is_directory:
-                quoted_output_name = shlex.quote(torrent.content_path.name)
-                quoted_content_link = shlex.quote(content_link)
-                wget_script = (
-                    "wget --no-host-directories "
-                    f"--output-document {quoted_output_name} "
-                    f"{quoted_content_link}"
+            if torrent.content_path is not None:
+                wget_script = _build_wget_script(
+                    content_path=torrent.content_path,
+                    content_link=content_link,
+                    content_is_directory=torrent.content_is_directory,
                 )
             else:
                 wget_script = (
@@ -665,6 +664,11 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         )
         infohash = validation.infohash
 
+        if await _try_handle_existing_completed_download(message=message, user_id=user_id, infohash=infohash):
+            reason = "already_downloaded"
+            queue_download_policy.mark_rejection("already_downloaded")
+            return
+
         is_duplicate = await asyncio.wait_for(
             asyncio.to_thread(torrent_service.is_torrent_already_queued, infohash),
             timeout=get_qbit_api_timeout_seconds(),
@@ -730,6 +734,11 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
             await message.answer("Torrent service is currently unavailable. Please contact admin.")
             return
 
+        if await _try_handle_existing_completed_download(message=message, user_id=user_id, infohash=infohash):
+            reason = "already_downloaded"
+            queue_download_policy.mark_rejection("already_downloaded")
+            return
+
         is_duplicate = await asyncio.wait_for(
             asyncio.to_thread(torrent_service.is_torrent_already_queued, infohash),
             timeout=get_qbit_api_timeout_seconds(),
@@ -774,6 +783,89 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
             infohash,
             reason,
         )
+
+
+
+def _build_wget_script(content_path: Path, content_link: str, content_is_directory: bool) -> str:
+    if not content_is_directory:
+        quoted_output_name = shlex.quote(content_path.name)
+        quoted_content_link = shlex.quote(content_link)
+        return (
+            "wget --no-host-directories "
+            f"--output-document {quoted_output_name} "
+            f"{quoted_content_link}"
+        )
+
+    return (
+        "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+        '--reject "index.html*" "'
+        f"{content_link}"
+        '"'
+    )
+
+
+def _resolve_existing_completed_content_path(user_id: int, content_path: str) -> Path | None:
+    if torrent_service is None:
+        return None
+
+    resolved_content_path = torrent_service.resolve_user_finished_content_path(user_id, content_path)
+    if resolved_content_path is None:
+        return None
+
+    if not resolved_content_path.exists():
+        return None
+
+    return resolved_content_path
+
+
+async def _try_handle_existing_completed_download(message: Message, user_id: int, infohash: str) -> bool:
+    if torrent_service is None or download_link_service is None or not download_link_service.is_configured():
+        return False
+
+    record = await asyncio.wait_for(
+        asyncio.to_thread(torrent_service.find_user_completed_download, user_id, infohash),
+        timeout=get_qbit_api_timeout_seconds(),
+    )
+    if record is None:
+        return False
+
+    content_path = _resolve_existing_completed_content_path(user_id=user_id, content_path=record.content_path)
+    if content_path is None:
+        await asyncio.wait_for(
+            asyncio.to_thread(torrent_service.delete_user_completed_download, user_id, infohash),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+        return False
+
+    try:
+        content_link = download_link_service.build_user_content_link(
+            user_id=user_id,
+            content_path=content_path,
+        )
+    except ValueError:
+        await asyncio.wait_for(
+            asyncio.to_thread(torrent_service.delete_user_completed_download, user_id, infohash),
+            timeout=get_qbit_api_timeout_seconds(),
+        )
+        return False
+
+    wget_script = _build_wget_script(
+        content_path=content_path,
+        content_link=content_link,
+        content_is_directory=content_path.is_dir(),
+    )
+    await message.answer(
+        (
+            "This torrent is already downloaded.\n\n"
+            f"Download link:\n{content_link}\n\n"
+            "Alternatively, you can download it via terminal. "
+            "Run this wget script (it downloads files into your current terminal folder):\n"
+            f"<pre>{escape(wget_script)}</pre>"
+        ),
+        parse_mode="HTML",
+    )
+    queue_download_session_state.clear_waiting(user_id)
+    return True
 
 
 def _map_qbit_error(exc: Exception) -> str:

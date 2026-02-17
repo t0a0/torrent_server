@@ -23,6 +23,7 @@ _QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
 _QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY = "QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC"
+_COMPLETED_DOWNLOADS_DB_PATH_KEY = "COMPLETED_DOWNLOADS_DB_PATH"
 
 def get_qbittorrent_url() -> str:
     """Resolve qBittorrent Web UI URL from environment."""
@@ -110,6 +111,12 @@ def get_queue_download_rate_limit_per_min() -> int:
 def get_torrent_input_tmp_dir() -> Path:
     load_env_file()
     raw_path = os.getenv(_TORRENT_INPUT_TMP_DIR_KEY, "tmp/torrent_inputs")
+    return Path(raw_path)
+
+
+def get_completed_downloads_db_path() -> Path:
+    load_env_file()
+    raw_path = os.getenv(_COMPLETED_DOWNLOADS_DB_PATH_KEY, "data/completed_downloads.sqlite3")
     return Path(raw_path)
 
 
