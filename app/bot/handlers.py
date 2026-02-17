@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from html import escape
 import logging
+from pathlib import Path
 import secrets
 import time
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -19,6 +20,7 @@ from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
 from app.torrent import CompletedTorrent, TorrentService
 from app.torrent.config import (
+    get_downloads_root,
     get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
     get_max_magnet_url_length,
@@ -108,11 +110,11 @@ class _CompletionNotifier:
             torrent_item_link = _build_torrent_item_link(folder_link, torrent.name)
             wget_command = (
                 "wget --recursive --no-parent --no-host-directories "
-                f'--content-disposition "{torrent_item_link}"'
+                f'--content-disposition "{folder_link}"'
             )
             text = (
                 f"{text}\n\nYour download folder link:\n{folder_link}"
-                f"\n\nDirect link for this completed torrent:\n{torrent_item_link}"
+                f"\n\nDirect link for this completed torrent (if available):\n{torrent_item_link}"
                 f"\n\nRun this command to download it with wget:\n<pre>{escape(wget_command)}</pre>"
             )
 
@@ -132,13 +134,37 @@ def _with_cancel_hint(text: str) -> str:
 
 def _build_torrent_item_link(folder_link: str, torrent_name: str | None) -> str:
     """Build a signed link to the completed torrent item under the user directory."""
-    if not torrent_name:
+    normalized_name = (torrent_name or "").strip("/")
+    if not normalized_name:
         return folder_link
 
     parsed = urlsplit(folder_link)
     normalized_path = parsed.path.rstrip("/")
-    item_path = quote(torrent_name.strip("/"), safe="")
+    item_path = quote(normalized_name, safe="")
+
+    # qBittorrent reports torrent name metadata, which may not exactly match the
+    # final path on disk in all cases. Fall back to the known-good folder link when
+    # the expected item path is not present.
+    if not _torrent_item_exists(parsed.path, normalized_name):
+        return folder_link
+
+    if _torrent_item_is_directory(parsed.path, normalized_name):
+        item_path = f"{item_path}/"
+
     return urlunsplit(parsed._replace(path=f"{normalized_path}/{item_path}"))
+
+
+def _torrent_item_exists(user_path: str, item_name: str) -> bool:
+    return _resolve_torrent_item_path(user_path, item_name).exists()
+
+
+def _torrent_item_is_directory(user_path: str, item_name: str) -> bool:
+    return _resolve_torrent_item_path(user_path, item_name).is_dir()
+
+
+def _resolve_torrent_item_path(user_path: str, item_name: str) -> Path:
+    user_id = user_path.strip("/")
+    return get_downloads_root() / user_id / item_name
 
 
 def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
