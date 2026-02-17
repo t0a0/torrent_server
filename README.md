@@ -125,6 +125,8 @@ DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
 ```
 
+`docker-compose.yml` intentionally reads these from `.env` (via `env_file`) so the path values are defined in one place.
+
 Generate a strong random secret for `DOWNLOAD_LINK_SECRET` (example):
 
 ```bash
