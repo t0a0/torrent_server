@@ -17,7 +17,7 @@ from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
-from app.torrent import CompletedTorrent, TorrentService
+from app.torrent import CompletedTorrent, FailedTorrent, TorrentService
 from app.torrent.config import (
     get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
@@ -97,6 +97,28 @@ class _CompletionNotifier:
 
         future.add_done_callback(_handle_result)
 
+    def on_torrent_failed(self, torrent: FailedTorrent) -> None:
+        if torrent.user_id is None:
+            logger.warning("Cannot notify torrent failure without user_id hash=%s", torrent.hash)
+            return
+
+        if self._bot is None or self._loop is None:
+            logger.warning("Bot runtime is not bound yet; skipping failure notification hash=%s", torrent.hash)
+            return
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_download_failure_message(torrent),
+            self._loop,
+        )
+
+        def _handle_result(done_future: asyncio.Future[None]) -> None:
+            try:
+                done_future.result()
+            except Exception:
+                logger.exception("Failed to send failure notification hash=%s", torrent.hash)
+
+        future.add_done_callback(_handle_result)
+
     async def _send_download_completion_message(self, torrent: CompletedTorrent) -> None:
         assert self._bot is not None
         assert torrent.user_id is not None
@@ -157,6 +179,23 @@ class _CompletionNotifier:
         )
 
 
+    async def _send_download_failure_message(self, torrent: FailedTorrent) -> None:
+        assert self._bot is not None
+        assert torrent.user_id is not None
+
+        torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
+        error_state = escape(torrent.state or "unknown")
+        await self._bot.send_message(
+            chat_id=torrent.user_id,
+            text=(
+                "❌ Download failed: "
+                f"<b>{torrent_name}</b>\n"
+                f"State: <code>{error_state}</code>\n"
+                "The torrent was removed from the queue and any partially downloaded files were deleted."
+            ),
+            parse_mode="HTML",
+        )
+
 completion_notifier = _CompletionNotifier()
 
 
@@ -192,7 +231,10 @@ def _build_download_link_service() -> DownloadLinkService | None:
 
 def _build_torrent_service() -> TorrentService | None:
     try:
-        return TorrentService(on_torrent_completed=completion_notifier.on_torrent_completed)
+        return TorrentService(
+            on_torrent_completed=completion_notifier.on_torrent_completed,
+            on_torrent_failed=completion_notifier.on_torrent_failed,
+        )
     except ValueError:
         logger.exception("Failed to initialize TorrentService")
         return None

@@ -47,6 +47,16 @@ class CompletedTorrent:
     content_is_directory: bool
 
 
+@dataclass(frozen=True)
+class FailedTorrent:
+    """Metadata about one torrent that entered an error state."""
+
+    hash: str
+    name: str | None
+    user_id: int | None
+    state: str | None
+
+
 class TorrentService:
     """Thin wrapper around python-qbittorrent with per-user save directories."""
 
@@ -56,6 +66,10 @@ class TorrentService:
         "queuedUP",
         "forcedUP",
         "checkingUP",
+    }
+    _FAILED_STATES = {
+        "error",
+        "missingFiles",
     }
 
     def __init__(
@@ -67,6 +81,7 @@ class TorrentService:
         active_downloads_root: Path | None = None,
         completion_poll_interval_seconds: float = 30.0,
         on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
+        on_torrent_failed: Callable[[FailedTorrent], None] | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
@@ -80,6 +95,7 @@ class TorrentService:
             qbittorrent_password if qbittorrent_password is not None else get_qbittorrent_password()
         )
         self._on_torrent_completed = on_torrent_completed
+        self._on_torrent_failed = on_torrent_failed
 
         self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
@@ -232,6 +248,26 @@ class TorrentService:
         for torrent in torrents:
             if not isinstance(torrent, dict):
                 continue
+
+            if self._is_failed_torrent(torrent):
+                torrent_hash = torrent.get("hash")
+                if not isinstance(torrent_hash, str) or not torrent_hash:
+                    continue
+
+                failed_torrent = FailedTorrent(
+                    hash=torrent_hash,
+                    name=torrent.get("name") if isinstance(torrent.get("name"), str) else None,
+                    user_id=self._extract_user_id_from_torrent(torrent),
+                    state=torrent.get("state") if isinstance(torrent.get("state"), str) else None,
+                )
+                self._notify_torrent_failed(failed_torrent)
+                self._delete_torrent_and_files(torrent_hash)
+                self._logger.info(
+                    "Deleted failed torrent '%s' and attempted to remove partial files",
+                    torrent_hash,
+                )
+                continue
+
             if not self._is_completed_torrent(torrent):
                 continue
 
@@ -289,6 +325,16 @@ class TorrentService:
             self._on_torrent_completed(torrent)
         except Exception:
             self._logger.exception("Failed to process completed torrent notification")
+
+    def _notify_torrent_failed(self, torrent: FailedTorrent) -> None:
+        """Call optional failure callback without breaking cleanup loop."""
+        if self._on_torrent_failed is None:
+            return
+
+        try:
+            self._on_torrent_failed(torrent)
+        except Exception:
+            self._logger.exception("Failed to process failed torrent notification")
 
     def _extract_user_id_from_torrent(self, torrent: dict[str, Any]) -> int | None:
         """Infer Telegram user id from qBittorrent save path rooted at active downloads dir."""
@@ -381,3 +427,8 @@ class TorrentService:
         """Return True when torrent is in a completed/upload state."""
         state = torrent.get("state")
         return state in self._FINISHED_STATES
+
+    def _is_failed_torrent(self, torrent: dict[str, Any]) -> bool:
+        """Return True when torrent is in a known failure state."""
+        state = torrent.get("state")
+        return state in self._FAILED_STATES
