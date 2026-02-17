@@ -119,7 +119,7 @@ For Docker Compose deployments, set:
 
 ```env
 DOWNLOADS_ROOT=/downloads
-ACTIVE_DOWNLOADS_ROOT=/activedownloads
+ACTIVE_DOWNLOADS_ROOT=/downloads/activedownloads
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -142,7 +142,7 @@ A ready-to-run `docker-compose.yml` is included for running the full stack with 
 - `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
 - `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
 
-Active torrent payloads are stored in a shared Docker volume (`activedownloads`) mounted into both `bot` and `qbittorrent`.
+Active torrent payloads are stored under `downloads/activedownloads` on the shared `downloads` Docker volume mounted into both `bot` and `qbittorrent`.
 
 When a torrent completes, it is removed from qBittorrent and then moved into the shared `downloads` volume served by `file-server`.
 
@@ -273,9 +273,9 @@ The service also runs a background cleanup loop that automatically removes compl
 
 ### Troubleshooting: `file_open ... Permission denied` in qBittorrent
 
-If qBittorrent reports a permission error under `/activedownloads/<telegram_user_id>/...`, it usually means that folder was created by a different container user (for example, the bot as root) and is not writable by qBittorrent.
+If qBittorrent reports a permission error under `/downloads/activedownloads/<telegram_user_id>/...`, ensure `ACTIVE_DOWNLOADS_ROOT` points inside the shared `/downloads` mount for both bot and qBittorrent (the default Compose setup uses `/downloads/activedownloads`).
 
-Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the active save path itself. For already-created folders, fix ownership/permissions on the shared active-downloads volume so qBittorrent can write there.
+Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the active save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
 
 Global upload limit is configured via `QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC` (default `1048576`, i.e. 1 MiB/s). On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
 
