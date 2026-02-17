@@ -143,8 +143,11 @@ class _CompletionNotifier:
                 )
             text = (
                 f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
+                "Alternatively, you can download it via terminal. "
                 "Run this wget script (it downloads files into your current terminal folder):\n"
-                f"<pre>{escape(wget_script)}</pre>"
+                f"<pre>{escape(wget_script)}</pre>\n\n"
+                "If you are on Windows, run this first in PowerShell:\n"
+                "<pre>wsl\nsudo apt update\nsudo apt install wget</pre>"
             )
 
         await self._bot.send_message(
