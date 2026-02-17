@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import secrets
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .config import (
     get_download_link_secret,
@@ -64,6 +64,30 @@ class DownloadLinkService:
             }
         )
         return f"{self._hfs_base_url}/{user_id}/?{query}"
+
+    def build_user_content_link(self, user_id: int, content_path: Path) -> str:
+        """Return an expiring signed link to one completed file/folder under user root."""
+        if not self._hfs_base_url:
+            raise ValueError("HFS_BASE_URL is not configured")
+
+        user_root = self.resolve_user_folder(user_id)
+        resolved_content_path = content_path.resolve()
+        if resolved_content_path != user_root and user_root not in resolved_content_path.parents:
+            raise ValueError("Content path is outside of user folder")
+
+        relative_parts = resolved_content_path.relative_to(user_root).parts
+        encoded_relative_path = "/".join(quote(part, safe="") for part in relative_parts)
+        suffix = f"/{encoded_relative_path}" if encoded_relative_path else "/"
+
+        signed_payload = self._build_signed_payload(user_id=user_id)
+        query = urlencode(
+            {
+                "expires": signed_payload.expires_at_epoch,
+                "nonce": signed_payload.nonce,
+                "sig": signed_payload.signature,
+            }
+        )
+        return f"{self._hfs_base_url}/{user_id}{suffix}?{query}"
 
     def resolve_user_folder(self, user_id: int) -> Path:
         """Resolve and return the only permitted folder for a Telegram user id."""

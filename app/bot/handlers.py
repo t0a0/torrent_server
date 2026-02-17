@@ -103,8 +103,39 @@ class _CompletionNotifier:
         torrent_name = escape((torrent.name or "(unnamed torrent)")[:96])
         text = f"✅ Download finished: <b>{torrent_name}</b>"
         if download_link_service is not None and download_link_service.is_configured():
-            folder_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
-            text = f"{text}\n\nYour download folder link:\n{folder_link}"
+            content_link: str | None = None
+            if torrent.content_path is not None:
+                try:
+                    content_link = download_link_service.build_user_content_link(
+                        user_id=torrent.user_id,
+                        content_path=torrent.content_path,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Failed to build content link for completed torrent hash=%s path=%s",
+                        torrent.hash,
+                        torrent.content_path,
+                    )
+
+            if content_link is None:
+                content_link = download_link_service.build_user_folder_link(user_id=torrent.user_id)
+
+            if torrent.content_is_directory and "?" in content_link:
+                path_part, query_part = content_link.split("?", maxsplit=1)
+                if not path_part.endswith("/"):
+                    content_link = f"{path_part}/?{query_part}"
+
+            wget_script = (
+                "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+                '--reject "index.html*" "'
+                f"{content_link}"
+                '"'
+            )
+            text = (
+                f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
+                "Run this wget script:\n"
+                f"<pre>{escape(wget_script)}</pre>"
+            )
 
         await self._bot.send_message(
             chat_id=torrent.user_id,
