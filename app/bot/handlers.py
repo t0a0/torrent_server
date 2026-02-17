@@ -126,30 +126,15 @@ class _CompletionNotifier:
                     content_link = f"{path_part}/?{query_part}"
 
             wget_script = (
-                "wget \
-"
-                "  --recursive \
-"
-                "  --no-parent \
-"
-                "  --no-host-directories \
-"
-                "  --cut-dirs=1 \
-"
-                "  --reject \"index.html*\" \
-"
-                f'  "{content_link}"'
+                "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+                '--reject "index.html*" "'
+                f"{content_link}"
+                '"'
             )
             text = (
                 f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
                 "Run this wget script:\n"
-                f"<pre>{escape(wget_script)}</pre>\n\n"
-                "Flags used:\n"
-                "• --recursive: download all files inside the folder\n"
-                "• --no-parent: do not traverse above this torrent path\n"
-                "• --no-host-directories: avoid creating host-based output folders\n"
-                "• --cut-dirs=1: drop the top-level user-id directory from local output\n"
-                "• --reject \"index.html*\": skip autoindex listing pages"
+                f"<pre>{escape(wget_script)}</pre>"
             )
 
         await self._bot.send_message(
