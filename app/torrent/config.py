@@ -9,6 +9,7 @@ _QBIT_URL_KEY = "QBITTORRENT_URL"
 _QBIT_USERNAME_KEY = "QBITTORRENT_USERNAME"
 _QBIT_PASSWORD_KEY = "QBITTORRENT_PASSWORD"
 _DOWNLOADS_ROOT_KEY = "DOWNLOADS_ROOT"
+_ACTIVE_DOWNLOADS_ROOT_KEY = "ACTIVE_DOWNLOADS_ROOT"
 _MAX_TORRENT_BYTES_HARD_KEY = "MAX_TORRENT_BYTES_HARD"
 _MAX_TORRENT_BYTES_WARN_KEY = "MAX_TORRENT_BYTES_WARN"
 _MAX_MAGNET_URL_LENGTH_KEY = "MAX_MAGNET_URL_LENGTH"
@@ -44,7 +45,14 @@ def get_qbittorrent_password() -> str | None:
 def get_downloads_root() -> Path:
     """Resolve local downloads root path used for per-user storage."""
     load_env_file()
-    root = os.getenv(_DOWNLOADS_ROOT_KEY, "downloads")
+    root = os.getenv(_DOWNLOADS_ROOT_KEY, "finished_downloads")
+    return Path(root)
+
+
+def get_active_downloads_root() -> Path:
+    """Resolve local active downloads root path used while torrents are in progress."""
+    load_env_file()
+    root = os.getenv(_ACTIVE_DOWNLOADS_ROOT_KEY, "active_downloads")
     return Path(root)
 
 
@@ -111,3 +119,4 @@ def get_qbit_api_timeout_seconds() -> int:
 
 def get_qbit_global_upload_limit_bytes_per_sec() -> int:
     return _get_int_env(_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY, 1024 * 1024)
+

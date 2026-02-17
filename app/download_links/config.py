@@ -50,5 +50,5 @@ def get_download_link_ttl_seconds() -> int:
 def get_downloads_root() -> Path:
     """Resolve local downloads root path used for per-user storage."""
     load_env_file()
-    root = os.getenv(_DOWNLOADS_ROOT_KEY, "downloads")
+    root = os.getenv(_DOWNLOADS_ROOT_KEY, "finished_downloads")
     return Path(root)

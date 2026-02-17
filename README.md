@@ -63,7 +63,8 @@ The Telegram bot and qBittorrent run as separate processes. Start qBittorrent fi
 QBITTORRENT_URL=http://127.0.0.1:8080
 QBITTORRENT_USERNAME=<your_webui_username>
 QBITTORRENT_PASSWORD=<your_webui_password>
-DOWNLOADS_ROOT=downloads
+DOWNLOADS_ROOT=finished_downloads
+ACTIVE_DOWNLOADS_ROOT=active_downloads
 QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
@@ -117,7 +118,8 @@ python3 -m app.bot.main
 For Docker Compose deployments, set:
 
 ```env
-DOWNLOADS_ROOT=/downloads
+DOWNLOADS_ROOT=/downloads/finished_downloads
+ACTIVE_DOWNLOADS_ROOT=/downloads/active_downloads
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -140,7 +142,9 @@ A ready-to-run `docker-compose.yml` is included for running the full stack with 
 - `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
 - `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
 
-All torrent payloads are stored in a shared Docker volume (`downloads`) mounted into both `qbittorrent` and `file-server`.
+Active torrent payloads are stored under `downloads/active_downloads` on the shared `downloads` Docker volume mounted into both `bot` and `qbittorrent`.
+
+When a torrent completes, it is removed from qBittorrent and then moved into the shared `downloads` volume served by `file-server`.
 
 Auth/whitelist records are stored in a separate SQLite file on a dedicated Docker volume (`auth_data`) mounted into the `bot` service at `/auth/auth.db`.
 
@@ -190,14 +194,14 @@ http://localhost:8081/<telegram_user_id>/
 4. Create a test file in that user's folder via the **write-capable** qBittorrent container:
 
 ```bash
-docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/<telegram_user_id> && echo hello > /downloads/<telegram_user_id>/test.txt'
+docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/finished_downloads/<telegram_user_id> && echo hello > /downloads/finished_downloads/<telegram_user_id>/test.txt'
 ```
 
 5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
 
 Notes:
 - `/srv/downloads` is inside the `file-server` container and mounted read-only there.
-- Use `/downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
+- Use `/downloads/finished_downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
 
 
 ## Phase 1 command flow
@@ -209,7 +213,7 @@ Notes:
 - `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
 - `/queuedownload`: available only for whitelisted users.
 - `/canceldownload`: available only for whitelisted users; lets the user pick an active torrent and cancel/delete it (including downloaded files).
-- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `downloads/<user_id>/`.
+- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `finished_downloads/<user_id>/`.
 
 ## Telegram command menu
 
@@ -233,7 +237,7 @@ Security behavior:
 - The bot only serves `/myfolder` to whitelisted users.
 - The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
 - Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 1800 seconds).
-- The folder mapping is fixed to `downloads/<user_id>/`, so user `123` only gets links to `downloads/123/`.
+- The folder mapping is fixed to `finished_downloads/<user_id>/`, so user `123` only gets links to `finished_downloads/123/`.
 
 > Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
 
@@ -246,16 +250,16 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 - `start_download_from_file_bytes(user_id, torrent_file_bytes)`
 - `start_download_from_magnet_url(user_id, magnet_url)`
 
-Both methods store download payloads under `downloads/<user_id>/...` (or `DOWNLOADS_ROOT/<user_id>/...` if configured).
+Both methods store active payloads under `active_downloads/<user_id>/...` (or `ACTIVE_DOWNLOADS_ROOT/<user_id>/...` if configured).
 
-The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
+The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. After removal, payload files are moved into `finished_downloads/<user_id>/...` (`DOWNLOADS_ROOT`) for `/myfolder` delivery. The cleanup interval defaults to 30 seconds.
 
 
 ## Phase 3 `/queuedownload` validation and queue flow
 
 - `/queuedownload` now starts an input session and prompts user to paste a magnet URL or upload a `.torrent` file.
 - Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
-- Valid payloads are queued via qBittorrent into `DOWNLOADS_ROOT/<telegram_user_id>/`.
+- Valid payloads are queued via qBittorrent into `ACTIVE_DOWNLOADS_ROOT/<telegram_user_id>/`.
 - Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
 
 ## `/status` live progress behavior
@@ -269,9 +273,9 @@ The service also runs a background cleanup loop that automatically removes compl
 
 ### Troubleshooting: `file_open ... Permission denied` in qBittorrent
 
-If qBittorrent reports a permission error under `/downloads/<telegram_user_id>/...`, it usually means that folder was created by a different container user (for example, the bot as root) and is not writable by qBittorrent.
+If qBittorrent reports a permission error under `/downloads/active_downloads/<telegram_user_id>/...`, ensure `ACTIVE_DOWNLOADS_ROOT` points inside the shared `/downloads` mount for both bot and qBittorrent (the default Compose setup uses `/downloads/active_downloads`).
 
-Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
+Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the active save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
 
 Global upload limit is configured via `QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC` (default `1048576`, i.e. 1 MiB/s). On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
 

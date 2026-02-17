@@ -12,7 +12,8 @@ services:
       - downloads:/downloads
       - auth_data:/auth
     environment:
-      DOWNLOADS_ROOT: /downloads
+      DOWNLOADS_ROOT: /downloads/finished_downloads
+      ACTIVE_DOWNLOADS_ROOT: /downloads/active_downloads
       QBITTORRENT_URL: http://qbittorrent:8080
       AUTH_DB_PATH: /auth/auth.db
     develop:
