@@ -664,7 +664,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         )
         infohash = validation.infohash
 
-        if await _try_handle_existing_completed_download(message=message, user_id=user_id, infohash=infohash):
+        if await _try_handle_existing_completed_download(message=message, user_id=user_id, target_name=validation.target_name):
             reason = "already_downloaded"
             queue_download_policy.mark_rejection("already_downloaded")
             return
@@ -734,7 +734,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
             await message.answer("Torrent service is currently unavailable. Please contact admin.")
             return
 
-        if await _try_handle_existing_completed_download(message=message, user_id=user_id, infohash=infohash):
+        if await _try_handle_existing_completed_download(message=message, user_id=user_id, target_name=validation.target_name):
             reason = "already_downloaded"
             queue_download_policy.mark_rejection("already_downloaded")
             return
@@ -804,38 +804,25 @@ def _build_wget_script(content_path: Path, content_link: str, content_is_directo
     )
 
 
-def _resolve_existing_completed_content_path(user_id: int, content_path: str) -> Path | None:
+def _resolve_existing_completed_content_path(user_id: int, target_name: str | None) -> Path | None:
     if torrent_service is None:
         return None
 
-    resolved_content_path = torrent_service.resolve_user_finished_content_path(user_id, content_path)
-    if resolved_content_path is None:
-        return None
-
-    if not resolved_content_path.exists():
-        return None
-
-    return resolved_content_path
+    return torrent_service.find_existing_finished_content(user_id=user_id, target_name=target_name)
 
 
-async def _try_handle_existing_completed_download(message: Message, user_id: int, infohash: str) -> bool:
-    if torrent_service is None or download_link_service is None or not download_link_service.is_configured():
-        return False
-
-    record = await asyncio.wait_for(
-        asyncio.to_thread(torrent_service.find_user_completed_download, user_id, infohash),
-        timeout=get_qbit_api_timeout_seconds(),
-    )
-    if record is None:
-        return False
-
-    content_path = _resolve_existing_completed_content_path(user_id=user_id, content_path=record.content_path)
+async def _try_handle_existing_completed_download(message: Message, user_id: int, target_name: str | None) -> bool:
+    content_path = _resolve_existing_completed_content_path(user_id=user_id, target_name=target_name)
     if content_path is None:
-        await asyncio.wait_for(
-            asyncio.to_thread(torrent_service.delete_user_completed_download, user_id, infohash),
-            timeout=get_qbit_api_timeout_seconds(),
-        )
         return False
+
+    if download_link_service is None or not download_link_service.is_configured():
+        await message.answer(
+            "This torrent is already downloaded in your finished downloads folder. "
+            "Use /myfolder to open it."
+        )
+        queue_download_session_state.clear_waiting(user_id)
+        return True
 
     try:
         content_link = download_link_service.build_user_content_link(
@@ -843,10 +830,6 @@ async def _try_handle_existing_completed_download(message: Message, user_id: int
             content_path=content_path,
         )
     except ValueError:
-        await asyncio.wait_for(
-            asyncio.to_thread(torrent_service.delete_user_completed_download, user_id, infohash),
-            timeout=get_qbit_api_timeout_seconds(),
-        )
         return False
 
     wget_script = _build_wget_script(

@@ -25,12 +25,14 @@ class ValidationError(ValueError):
 @dataclass(frozen=True)
 class TorrentValidationResult:
     infohash: str
+    target_name: str
 
 
 @dataclass(frozen=True)
 class MagnetValidationResult:
     infohash: str
     normalized_url: str
+    target_name: str | None
 
 
 class _BencodeParser:
@@ -211,7 +213,7 @@ def validate_torrent_file_bytes(
             raise ValidationError("torrent_aggregate_too_large", "Torrent declared content size exceeds policy limit.")
 
     infohash = hashlib.sha1(_bencode_encode(info)).hexdigest().lower()
-    return TorrentValidationResult(infohash=infohash)
+    return TorrentValidationResult(infohash=infohash, target_name=name)
 
 
 def _validate_tracker_fields(parsed: dict[bytes, Any], max_tracker_url_length: int) -> None:
@@ -276,6 +278,7 @@ def validate_magnet_url(
     tracker_count = 0
     has_source = False
     normalized_pairs: list[tuple[str, str]] = [("xt", f"urn:btih:{infohash}")]
+    target_name: str | None = None
     for key, value in params:
         if len(key) > max_param_length or len(value) > max_param_length:
             raise ValidationError("magnet_param_too_long", "A magnet parameter is too long.")
@@ -289,13 +292,15 @@ def validate_magnet_url(
         if key == "ws":
             has_source = True
         normalized_pairs.append((key, value))
+        if key == "dn" and target_name is None and value.strip():
+            target_name = value.strip()
 
     if require_source_param and not has_source:
         raise ValidationError("magnet_missing_source", "Magnet URL must include at least one tracker/web-seed parameter.")
 
     query = "&".join(f"{quote(key, safe='')}={quote(value, safe=':/?&=+%')}" for key, value in normalized_pairs)
     normalized_url = urlunsplit(("magnet", "", "", query, ""))
-    return MagnetValidationResult(infohash=infohash, normalized_url=normalized_url)
+    return MagnetValidationResult(infohash=infohash, normalized_url=normalized_url, target_name=target_name)
 
 
 def _extract_infohash(xt_values: list[str]) -> str:
