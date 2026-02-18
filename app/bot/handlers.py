@@ -7,7 +7,9 @@ from html import escape
 import logging
 import secrets
 import shlex
+import shutil
 import time
+from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
@@ -19,6 +21,8 @@ from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
 from app.torrent import CompletedTorrent, FailedTorrent, TorrentService
 from app.torrent.config import (
+    get_active_downloads_root,
+    get_finished_downloads_root,
     get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
     get_max_magnet_url_length,
@@ -201,6 +205,34 @@ class _CompletionNotifier:
         )
 
 completion_notifier = _CompletionNotifier()
+
+
+def _build_user_storage_path(storage_root: Path, user_id: int) -> Path:
+    """Resolve a user storage path under an expected root directory."""
+    resolved_root = storage_root.resolve()
+    user_storage_path = (resolved_root / str(user_id)).resolve()
+    if resolved_root not in user_storage_path.parents:
+        raise ValueError("Resolved user storage path is outside expected root")
+    return user_storage_path
+
+
+def _delete_user_download_folders(user_id: int) -> tuple[list[Path], list[Path]]:
+    """Delete per-user folders from active and finished downloads roots."""
+    deleted_paths: list[Path] = []
+    failed_paths: list[Path] = []
+    for storage_root in (get_active_downloads_root(), get_finished_downloads_root()):
+        user_storage_path = _build_user_storage_path(storage_root, user_id)
+        if not user_storage_path.exists():
+            continue
+
+        try:
+            shutil.rmtree(user_storage_path)
+            deleted_paths.append(user_storage_path)
+        except OSError:
+            logger.exception("Failed to delete user storage path '%s'", user_storage_path)
+            failed_paths.append(user_storage_path)
+
+    return deleted_paths, failed_paths
 
 
 def _with_cancel_hint(text: str) -> str:
@@ -561,7 +593,22 @@ async def handle_removeuser(message: Message, command: CommandObject) -> None:
 
     if auth_service.remove_user(target_user_id):
         await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
-        await message.answer(f"Removed user {target_user_id} from whitelist.")
+        _, failed_paths = _delete_user_download_folders(target_user_id)
+        if failed_paths:
+            failed_paths_display = "\n".join(f"- <code>{escape(str(path))}</code>" for path in failed_paths)
+            await message.answer(
+                (
+                    f"Removed user {target_user_id} from whitelist.\n"
+                    "However, some user folders could not be deleted:\n"
+                    f"{failed_paths_display}"
+                ),
+                parse_mode="HTML",
+            )
+            return
+
+        await message.answer(
+            f"Removed user {target_user_id} from whitelist and deleted their download folders."
+        )
         return
 
     await message.answer(f"User {target_user_id} is not whitelisted.")
