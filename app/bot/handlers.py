@@ -259,6 +259,79 @@ def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _build_finished_downloads_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
+    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
+    if not user_finished_root.exists() or not user_finished_root.is_dir():
+        return None
+
+    entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
+    if not entries:
+        return None
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, entry in enumerate(entries):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=_get_user_display_torrent_name(entry.name),
+                    callback_data=f"download_link:{index}",
+                )
+            ]
+        )
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
+    if download_link_service is None or not download_link_service.is_configured():
+        raise ValueError("download_links_not_configured")
+
+    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
+    entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
+    if selected_index < 0 or selected_index >= len(entries):
+        raise ValueError("invalid_selection")
+
+    selected_path = entries[selected_index].resolve()
+    if user_finished_root not in selected_path.parents:
+        raise ValueError("invalid_selection")
+
+    if not selected_path.exists():
+        raise FileNotFoundError("selected_download_missing")
+
+    content_link = download_link_service.build_user_content_link(user_id=user_id, content_path=selected_path)
+    selected_name_display = escape(_get_user_display_torrent_name(selected_path.name))
+
+    if selected_path.is_file():
+        quoted_output_name = shlex.quote(selected_path.name)
+        quoted_content_link = shlex.quote(content_link)
+        wget_script = (
+            "wget --no-host-directories "
+            f"--output-document {quoted_output_name} "
+            f"{quoted_content_link}"
+        )
+    else:
+        if "?" in content_link:
+            path_part, query_part = content_link.split("?", maxsplit=1)
+            if not path_part.endswith("/"):
+                content_link = f"{path_part}/?{query_part}"
+
+        wget_script = (
+            "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+            '--reject "index.html*" "'
+            f"{content_link}"
+            '"'
+        )
+
+    return (
+        f"✅ Download ready: <b>{selected_name_display}</b>\n"
+        "⏳ This download will be available for 7 days.\n\n"
+        f"Download link:\n{escape(content_link)}\n\n"
+        "Alternatively, you can download it via terminal. "
+        "Run this wget script (it downloads files into your current terminal folder):\n"
+        f"<pre>{escape(wget_script)}</pre>"
+    )
+
+
 def _build_download_link_service() -> DownloadLinkService | None:
     try:
         return DownloadLinkService()
@@ -518,6 +591,71 @@ async def handle_myfolder(message: Message) -> None:
         f"{folder_link}\n\n"
         "This link is scoped to your Telegram user folder only."
     )
+
+
+@router.message(Command("getdownloadlink"))
+async def handle_getdownloadlink(message: Message) -> None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
+        return
+
+    user_id, _ = actor
+    try:
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id)
+    except ValueError:
+        await message.answer("Failed to resolve your finished downloads folder.")
+        return
+
+    if keyboard is None:
+        await message.answer("No finished downloads found in your folder yet.")
+        return
+
+    await message.answer("Select a finished download to get its direct link:", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("download_link:"))
+async def handle_download_link_click(callback_query: CallbackQuery) -> None:
+    message = callback_query.message
+    actor = callback_query.from_user
+    if message is None or actor is None:
+        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+        return
+
+    if not auth_service.is_whitelisted(actor.id):
+        await callback_query.answer("You are not authenticated.", show_alert=True)
+        return
+
+    callback_data = callback_query.data or ""
+    selection_token = callback_data.partition(":")[2].strip()
+    if not selection_token:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        selected_index = int(selection_token)
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    await callback_query.answer()
+
+    try:
+        reply_text = await asyncio.to_thread(_build_finished_download_reply, actor.id, selected_index)
+    except FileNotFoundError:
+        await message.answer("That download no longer exists. Run /getdownloadlink again.")
+        return
+    except ValueError as exc:
+        if str(exc) == "download_links_not_configured":
+            await message.answer(
+                "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
+                "and DOWNLOAD_LINK_SECRET."
+            )
+            return
+
+        await message.answer("Invalid selection. Run /getdownloadlink again.")
+        return
+
+    await message.answer(reply_text, parse_mode="HTML")
 
 
 @router.message(Command("generateaccesstoken"))
