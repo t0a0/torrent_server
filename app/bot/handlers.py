@@ -132,7 +132,10 @@ class _CompletionNotifier:
         assert torrent.user_id is not None
 
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
-        text = f"✅ Download finished: <b>{torrent_name}</b>"
+        text = (
+            f"✅ Download finished: <b>{torrent_name}</b>\n"
+            "⏳ This download will be available for 7 days."
+        )
         if download_link_service is not None and download_link_service.is_configured():
             content_link: str | None = None
             if torrent.content_path is not None:

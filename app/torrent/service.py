@@ -6,6 +6,7 @@ import logging
 import shutil
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -16,12 +17,14 @@ from qbittorrent.client import LoginRequired
 
 from .config import (
     get_active_downloads_root,
+    get_download_records_db_path,
     get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
     get_qbittorrent_username,
     get_qbit_global_upload_limit_bytes_per_sec,
 )
+from .download_records import DownloadRecordRepository
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,8 @@ class TorrentService:
         "error",
         "missingFiles",
     }
+    _DOWNLOAD_RETENTION_DAYS = 7
+    _RETENTION_POLL_INTERVAL_SECONDS = 60 * 60
 
     def __init__(
         self,
@@ -96,9 +101,11 @@ class TorrentService:
         )
         self._on_torrent_completed = on_torrent_completed
         self._on_torrent_failed = on_torrent_failed
+        self._download_records = DownloadRecordRepository(get_download_records_db_path())
 
         self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
+        self._start_finished_downloads_retention_worker()
 
     def _apply_global_upload_limit(self) -> None:
         """Apply qBittorrent global upload speed limit from environment config."""
@@ -262,6 +269,19 @@ class TorrentService:
                 self._logger.exception("Failed while cleaning up completed torrents")
             time.sleep(self._completion_poll_interval_seconds)
 
+    def _start_finished_downloads_retention_worker(self) -> None:
+        """Run one daemon worker that removes expired finished downloads."""
+        threading.Thread(target=self._finished_downloads_retention_loop, daemon=True).start()
+
+    def _finished_downloads_retention_loop(self) -> None:
+        """Continuously remove finished downloads older than retention threshold."""
+        while True:
+            try:
+                self._cleanup_expired_finished_downloads()
+            except Exception:
+                self._logger.exception("Failed while cleaning up expired finished downloads")
+            time.sleep(self._RETENTION_POLL_INTERVAL_SECONDS)
+
     def _delete_completed_torrents(self) -> None:
         """Delete all completed torrents from queue and keep files on disk."""
         torrents = self._call_with_auth(self._client.torrents)
@@ -312,6 +332,12 @@ class TorrentService:
                 content_path=moved_content_path,
                 content_is_directory=moved_content_path.is_dir() if moved_content_path is not None else False,
             )
+            if completed_torrent_user_id is not None and self._is_within_finished_downloads_root(moved_content_path):
+                self._download_records.add_record(
+                    user_id=completed_torrent_user_id,
+                    content_path=moved_content_path,
+                    torrent_hash=torrent_hash,
+                )
             self._notify_torrent_completed(completed_torrent)
 
             self._call_with_auth(self._client.delete, torrent_hash)
@@ -430,6 +456,58 @@ class TorrentService:
             return completed_content_path
 
         return moved_path
+
+    def _cleanup_expired_finished_downloads(self) -> None:
+        """Delete stale finished-download payloads and their SQLite records."""
+        retention_cutoff_timestamp = int(
+            (datetime.now(timezone.utc) - timedelta(days=self._DOWNLOAD_RETENTION_DAYS)).timestamp()
+        )
+        all_records = self._download_records.get_all_records()
+        for record in all_records:
+            if record.moved_at_unix_seconds > retention_cutoff_timestamp:
+                continue
+
+            content_path = record.content_path
+            if not self._is_within_finished_downloads_root(content_path):
+                self._logger.warning(
+                    "Deleting download record id=%s with out-of-scope path '%s'",
+                    record.id,
+                    content_path,
+                )
+                self._download_records.delete_record(record.id)
+                continue
+
+            if not content_path.exists():
+                self._download_records.delete_record(record.id)
+                continue
+
+            try:
+                if content_path.is_dir():
+                    shutil.rmtree(content_path)
+                else:
+                    content_path.unlink()
+            except OSError:
+                self._logger.exception(
+                    "Failed to delete expired finished download '%s' for record id=%s",
+                    content_path,
+                    record.id,
+                )
+                continue
+
+            self._download_records.delete_record(record.id)
+
+    def _is_within_finished_downloads_root(self, content_path: Path | None) -> bool:
+        """Return True when a path resolves under finished downloads root."""
+        if content_path is None:
+            return False
+        try:
+            resolved_content_path = content_path.resolve()
+        except OSError:
+            return False
+
+        if resolved_content_path == self._finished_downloads_root:
+            return False
+        return self._finished_downloads_root in resolved_content_path.parents
 
 
     def _is_user_torrent(self, torrent: dict[str, Any], user_id: int) -> bool:
