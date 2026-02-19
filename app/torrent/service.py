@@ -18,6 +18,7 @@ from qbittorrent.client import LoginRequired
 from .config import (
     get_active_downloads_root,
     get_download_records_db_path,
+    get_finished_download_retention_days,
     get_finished_downloads_root,
     get_qbittorrent_password,
     get_qbittorrent_url,
@@ -74,7 +75,6 @@ class TorrentService:
         "error",
         "missingFiles",
     }
-    _DOWNLOAD_RETENTION_DAYS = 7
     _RETENTION_POLL_INTERVAL_SECONDS = 60 * 60
 
     def __init__(
@@ -102,6 +102,9 @@ class TorrentService:
         self._on_torrent_completed = on_torrent_completed
         self._on_torrent_failed = on_torrent_failed
         self._download_records = DownloadRecordRepository(get_download_records_db_path())
+        self._download_retention_days = get_finished_download_retention_days()
+        if self._download_retention_days <= 0:
+            raise ValueError("FINISHED_DOWNLOAD_RETENTION_DAYS must be > 0")
 
         self._apply_global_upload_limit()
         self._start_completion_cleanup_worker()
@@ -460,7 +463,7 @@ class TorrentService:
     def _cleanup_expired_finished_downloads(self) -> None:
         """Delete stale finished-download payloads and their SQLite records."""
         retention_cutoff_timestamp = int(
-            (datetime.now(timezone.utc) - timedelta(days=self._DOWNLOAD_RETENTION_DAYS)).timestamp()
+            (datetime.now(timezone.utc) - timedelta(days=self._download_retention_days)).timestamp()
         )
         all_records = self._download_records.get_all_records()
         for record in all_records:

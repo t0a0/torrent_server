@@ -66,6 +66,7 @@ QBITTORRENT_PASSWORD=<your_webui_password>
 ACTIVE_DOWNLOADS_ROOT=active_downloads
 FINISHED_DOWNLOADS_ROOT=finished_downloads
 DOWNLOAD_RECORDS_DB_PATH=download_records.db
+FINISHED_DOWNLOAD_RETENTION_DAYS=7
 QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
@@ -122,6 +123,7 @@ For Docker Compose deployments, set:
 ACTIVE_DOWNLOADS_ROOT=/downloads/active_downloads
 FINISHED_DOWNLOADS_ROOT=/downloads/finished_downloads
 DOWNLOAD_RECORDS_DB_PATH=/downloads/download_records.db
+FINISHED_DOWNLOAD_RETENTION_DAYS=7
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -259,7 +261,7 @@ When a torrent is moved into `FINISHED_DOWNLOADS_ROOT`, the bot also stores a do
 - move timestamp
 - torrent hash
 
-The torrent service runs an hourly retention cleanup loop that:
+The torrent service runs an hourly retention cleanup loop (configured by `FINISHED_DOWNLOAD_RETENTION_DAYS`, default `7`) that:
 
 - removes files/folders older than 7 days,
 - removes their matching SQLite records,
