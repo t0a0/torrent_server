@@ -75,8 +75,6 @@ class TorrentService:
         "error",
         "missingFiles",
     }
-    _RETENTION_POLL_INTERVAL_SECONDS = 60 * 60
-
     def __init__(
         self,
         qbittorrent_url: str | None = None,
@@ -85,11 +83,13 @@ class TorrentService:
         finished_downloads_root: Path | None = None,
         active_downloads_root: Path | None = None,
         completion_poll_interval_seconds: float = 30.0,
+        retention_poll_interval_seconds: float = 60.0 * 60.0,
         on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
         on_torrent_failed: Callable[[FailedTorrent], None] | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._completion_poll_interval_seconds = max(completion_poll_interval_seconds, 1.0)
+        self._retention_poll_interval_seconds = max(retention_poll_interval_seconds, 1.0)
         self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
         self._active_downloads_root = (active_downloads_root or get_active_downloads_root()).resolve()
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
@@ -283,7 +283,7 @@ class TorrentService:
                 self._cleanup_expired_finished_downloads()
             except Exception:
                 self._logger.exception("Failed while cleaning up expired finished downloads")
-            time.sleep(self._RETENTION_POLL_INTERVAL_SECONDS)
+            time.sleep(self._retention_poll_interval_seconds)
 
     def _delete_completed_torrents(self) -> None:
         """Delete all completed torrents from queue and keep files on disk."""
