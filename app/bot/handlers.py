@@ -323,8 +323,7 @@ def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
         )
 
     return (
-        f"✅ Download ready: <b>{selected_name_display}</b>\n"
-        "⏳ This download will be available for 7 days.\n\n"
+        f"✅ Download ready: <b>{selected_name_display}</b>\n\n"
         f"Download link:\n{escape(content_link)}\n\n"
         "Alternatively, you can download it via terminal. "
         "Run this wget script (it downloads files into your current terminal folder):\n"
