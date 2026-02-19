@@ -65,6 +65,8 @@ QBITTORRENT_USERNAME=<your_webui_username>
 QBITTORRENT_PASSWORD=<your_webui_password>
 ACTIVE_DOWNLOADS_ROOT=active_downloads
 FINISHED_DOWNLOADS_ROOT=finished_downloads
+DOWNLOAD_RECORDS_DB_PATH=download_records.db
+FINISHED_DOWNLOAD_RETENTION_DAYS=7
 QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
@@ -120,6 +122,8 @@ For Docker Compose deployments, set:
 ```env
 ACTIVE_DOWNLOADS_ROOT=/downloads/active_downloads
 FINISHED_DOWNLOADS_ROOT=/downloads/finished_downloads
+DOWNLOAD_RECORDS_DB_PATH=/downloads/download_records.db
+FINISHED_DOWNLOAD_RETENTION_DAYS=7
 HFS_BASE_URL=http://localhost:8081
 DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
 DOWNLOAD_LINK_TTL_SECONDS=1800
@@ -250,6 +254,19 @@ A qBittorrent-backed service now lives in `app/torrent/service.py` with two meth
 
 Both methods queue payloads into `ACTIVE_DOWNLOADS_ROOT/<user_id>/...` and move completed files into `FINISHED_DOWNLOADS_ROOT/<user_id>/...`.
 
+When a torrent is moved into `FINISHED_DOWNLOADS_ROOT`, the bot also stores a download record in SQLite (`DOWNLOAD_RECORDS_DB_PATH`, default `download_records.db`) with:
+
+- Telegram `user_id`
+- moved content path
+- move timestamp
+- torrent hash
+
+The torrent service runs an hourly retention cleanup loop (configured by `FINISHED_DOWNLOAD_RETENTION_DAYS`, default `7`) that:
+
+- removes files/folders older than 7 days,
+- removes their matching SQLite records,
+- removes stale records if the stored path no longer exists on disk.
+
 The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
 
 
@@ -276,4 +293,3 @@ If qBittorrent reports a permission error under `/downloads/active_downloads/<te
 Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
 
 Global upload limit is configured via `QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC` (default `1048576`, i.e. 1 MiB/s). On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
-

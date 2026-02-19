@@ -132,7 +132,10 @@ class _CompletionNotifier:
         assert torrent.user_id is not None
 
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
-        text = f"✅ Download finished: <b>{torrent_name}</b>"
+        text = (
+            f"✅ Download finished: <b>{torrent_name}</b>\n"
+            "⏳ This download will be available for 7 days."
+        )
         if download_link_service is not None and download_link_service.is_configured():
             content_link: str | None = None
             if torrent.content_path is not None:
@@ -175,9 +178,7 @@ class _CompletionNotifier:
                 f"{text}\n\nDownload link:\n{escape(content_link)}\n\n"
                 "Alternatively, you can download it via terminal. "
                 "Run this wget script (it downloads files into your current terminal folder):\n"
-                f"<pre>{escape(wget_script)}</pre>\n\n"
-                "If you are on Windows, run this first in PowerShell:\n"
-                "<pre>wsl\nsudo apt update\nsudo apt install wget</pre>"
+                f"<pre>{escape(wget_script)}</pre>"
             )
 
         await self._bot.send_message(

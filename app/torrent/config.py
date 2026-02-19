@@ -23,6 +23,8 @@ _QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
 _QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY = "QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC"
+_DOWNLOAD_RECORDS_DB_PATH_KEY = "DOWNLOAD_RECORDS_DB_PATH"
+_FINISHED_DOWNLOAD_RETENTION_DAYS_KEY = "FINISHED_DOWNLOAD_RETENTION_DAYS"
 
 def get_qbittorrent_url() -> str:
     """Resolve qBittorrent Web UI URL from environment."""
@@ -119,3 +121,15 @@ def get_qbit_api_timeout_seconds() -> int:
 
 def get_qbit_global_upload_limit_bytes_per_sec() -> int:
     return _get_int_env(_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY, 1024 * 1024)
+
+
+def get_download_records_db_path() -> Path:
+    """Resolve SQLite path for finished download retention records."""
+    load_env_file()
+    raw_path = os.getenv(_DOWNLOAD_RECORDS_DB_PATH_KEY, "download_records.db")
+    return Path(raw_path)
+
+
+def get_finished_download_retention_days() -> int:
+    """Resolve retention days for finished downloads cleanup."""
+    return _get_int_env(_FINISHED_DOWNLOAD_RETENTION_DAYS_KEY, 7)
