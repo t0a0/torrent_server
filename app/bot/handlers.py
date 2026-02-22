@@ -134,7 +134,7 @@ class _CompletionNotifier:
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         text = (
             f"✅ Download finished: <b>{torrent_name}</b>\n"
-            "⏳ This download link is valid for 24 hours.\n"
+            "⏳ This download will be available for 7 days.\n"
             "🔁 After the link expires, use /getdownloadlink to access the file/folder again."
         )
         if download_link_service is not None and download_link_service.is_configured():
