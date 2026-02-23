@@ -67,7 +67,6 @@ ACTIVE_DOWNLOADS_ROOT=active_downloads
 FINISHED_DOWNLOADS_ROOT=finished_downloads
 DOWNLOAD_RECORDS_DB_PATH=download_records.db
 FINISHED_DOWNLOAD_RETENTION_DAYS=7
-QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC=1048576
 ```
 
 ### VPS (Docker example)
@@ -288,4 +287,4 @@ If qBittorrent reports a permission error under `/downloads/active_downloads/<te
 
 Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
 
-Global upload limit is configured via `QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC` (default `1048576`, i.e. 1 MiB/s). On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
+Global upload limit is currently fixed at `1048576` bytes/sec (1 MiB/s) as an internal constant. On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).

@@ -10,21 +10,22 @@ _QBIT_USERNAME_KEY = "QBITTORRENT_USERNAME"
 _QBIT_PASSWORD_KEY = "QBITTORRENT_PASSWORD"
 _ACTIVE_DOWNLOADS_ROOT_KEY = "ACTIVE_DOWNLOADS_ROOT"
 _FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
-_MAX_TORRENT_BYTES_HARD_KEY = "MAX_TORRENT_BYTES_HARD"
-_MAX_TORRENT_BYTES_WARN_KEY = "MAX_TORRENT_BYTES_WARN"
-_MAX_MAGNET_URL_LENGTH_KEY = "MAX_MAGNET_URL_LENGTH"
-_MAX_MAGNET_TRACKERS_KEY = "MAX_MAGNET_TRACKERS"
-_MAX_TORRENT_FILE_COUNT_KEY = "MAX_TORRENT_FILE_COUNT"
-_MAX_TORRENT_NAME_LENGTH_KEY = "MAX_TORRENT_NAME_LENGTH"
-_MAX_TRACKER_URL_LENGTH_KEY = "MAX_TRACKER_URL_LENGTH"
-_MAX_PATH_SEGMENT_LENGTH_KEY = "MAX_TORRENT_PATH_SEGMENT_LENGTH"
-_MAX_AGGREGATE_SIZE_BYTES_KEY = "MAX_TORRENT_AGGREGATE_SIZE_BYTES"
-_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY = "QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
-_QBIT_API_TIMEOUT_SECONDS_KEY = "QBIT_API_TIMEOUT_SECONDS"
-_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY = "QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC"
 _DOWNLOAD_RECORDS_DB_PATH_KEY = "DOWNLOAD_RECORDS_DB_PATH"
 _FINISHED_DOWNLOAD_RETENTION_DAYS_KEY = "FINISHED_DOWNLOAD_RETENTION_DAYS"
+
+_MAX_TORRENT_BYTES_HARD = 2 * 1024 * 1024
+_MAX_TORRENT_BYTES_WARN = 512 * 1024
+_MAX_MAGNET_URL_LENGTH = 8192
+_MAX_MAGNET_TRACKERS = 100
+_MAX_TORRENT_FILE_COUNT = 10000
+_MAX_TORRENT_NAME_LENGTH = 255
+_MAX_TRACKER_URL_LENGTH = 2048
+_MAX_PATH_SEGMENT_LENGTH = 255
+_MAX_AGGREGATE_SIZE_BYTES = 0
+_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN = 10
+_QBIT_API_TIMEOUT_SECONDS = 15
+_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC = 1024 * 1024
 
 def get_qbittorrent_url() -> str:
     """Resolve qBittorrent Web UI URL from environment."""
@@ -70,43 +71,43 @@ def _get_int_env(key: str, default: int) -> int:
 
 
 def get_max_torrent_bytes_hard() -> int:
-    return _get_int_env(_MAX_TORRENT_BYTES_HARD_KEY, 2 * 1024 * 1024)
+    return _MAX_TORRENT_BYTES_HARD
 
 
 def get_max_torrent_bytes_warn() -> int:
-    return _get_int_env(_MAX_TORRENT_BYTES_WARN_KEY, 512 * 1024)
+    return _MAX_TORRENT_BYTES_WARN
 
 
 def get_max_magnet_url_length() -> int:
-    return _get_int_env(_MAX_MAGNET_URL_LENGTH_KEY, 8192)
+    return _MAX_MAGNET_URL_LENGTH
 
 
 def get_max_magnet_trackers() -> int:
-    return _get_int_env(_MAX_MAGNET_TRACKERS_KEY, 100)
+    return _MAX_MAGNET_TRACKERS
 
 
 def get_max_torrent_file_count() -> int:
-    return _get_int_env(_MAX_TORRENT_FILE_COUNT_KEY, 10000)
+    return _MAX_TORRENT_FILE_COUNT
 
 
 def get_max_torrent_name_length() -> int:
-    return _get_int_env(_MAX_TORRENT_NAME_LENGTH_KEY, 255)
+    return _MAX_TORRENT_NAME_LENGTH
 
 
 def get_max_tracker_url_length() -> int:
-    return _get_int_env(_MAX_TRACKER_URL_LENGTH_KEY, 2048)
+    return _MAX_TRACKER_URL_LENGTH
 
 
 def get_max_torrent_path_segment_length() -> int:
-    return _get_int_env(_MAX_PATH_SEGMENT_LENGTH_KEY, 255)
+    return _MAX_PATH_SEGMENT_LENGTH
 
 
 def get_max_torrent_aggregate_size_bytes() -> int:
-    return _get_int_env(_MAX_AGGREGATE_SIZE_BYTES_KEY, 0)
+    return _MAX_AGGREGATE_SIZE_BYTES
 
 
 def get_queue_download_rate_limit_per_min() -> int:
-    return _get_int_env(_QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN_KEY, 10)
+    return _QUEUE_DOWNLOAD_RATE_LIMIT_PER_MIN
 
 
 def get_torrent_input_tmp_dir() -> Path:
@@ -116,11 +117,11 @@ def get_torrent_input_tmp_dir() -> Path:
 
 
 def get_qbit_api_timeout_seconds() -> int:
-    return _get_int_env(_QBIT_API_TIMEOUT_SECONDS_KEY, 15)
+    return _QBIT_API_TIMEOUT_SECONDS
 
 
 def get_qbit_global_upload_limit_bytes_per_sec() -> int:
-    return _get_int_env(_QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC_KEY, 1024 * 1024)
+    return _QBIT_GLOBAL_UPLOAD_LIMIT_BYTES_PER_SEC
 
 
 def get_download_records_db_path() -> Path:
