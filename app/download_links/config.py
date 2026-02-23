@@ -9,7 +9,7 @@ from app.config import load_env_file
 
 _HFS_BASE_URL_KEY = "HFS_BASE_URL"
 _DOWNLOAD_LINK_SECRET_KEY = "DOWNLOAD_LINK_SECRET"
-_DOWNLOAD_LINK_TTL_SECONDS_KEY = "DOWNLOAD_LINK_TTL_SECONDS"
+_DOWNLOAD_LINK_TTL_HOURS_KEY = "DOWNLOAD_LINK_TTL_HOURS"
 _FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
 
 
@@ -31,20 +31,20 @@ def get_download_link_secret() -> str:
     return secret
 
 
-def get_download_link_ttl_seconds() -> int:
-    """Resolve link TTL in seconds, defaulting to 24 hours."""
+def get_download_link_ttl_hours() -> int:
+    """Resolve link TTL in hours, defaulting to 24 hours."""
     load_env_file()
-    raw_ttl = os.getenv(_DOWNLOAD_LINK_TTL_SECONDS_KEY, "86400")
+    raw_ttl = os.getenv(_DOWNLOAD_LINK_TTL_HOURS_KEY, "24")
     try:
-        ttl_seconds = int(raw_ttl)
+        ttl_hours = int(raw_ttl)
     except ValueError as exc:
         raise ValueError(
-            f"Invalid integer in {_DOWNLOAD_LINK_TTL_SECONDS_KEY}: {raw_ttl}"
+            f"Invalid integer in {_DOWNLOAD_LINK_TTL_HOURS_KEY}: {raw_ttl}"
         ) from exc
 
-    if ttl_seconds <= 0:
-        raise ValueError(f"{_DOWNLOAD_LINK_TTL_SECONDS_KEY} must be greater than 0")
-    return ttl_seconds
+    if ttl_hours <= 0:
+        raise ValueError(f"{_DOWNLOAD_LINK_TTL_HOURS_KEY} must be greater than 0")
+    return ttl_hours
 
 
 def get_finished_downloads_root() -> Path:

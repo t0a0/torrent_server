@@ -19,10 +19,12 @@ from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_auth_db_path, get_owner_user_id
 from app.download_links import DownloadLinkService
+from app.download_links.config import get_download_link_ttl_hours
 from app.torrent import CompletedTorrent, FailedTorrent, TorrentService
 from app.torrent.config import (
     get_active_downloads_root,
     get_finished_downloads_root,
+    get_finished_download_retention_days,
     get_queue_download_rate_limit_per_min,
     get_max_magnet_trackers,
     get_max_magnet_url_length,
@@ -136,9 +138,12 @@ class _CompletionNotifier:
         assert torrent.user_id is not None
 
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
+        retention_days = get_finished_download_retention_days()
+        link_ttl_hours = get_download_link_ttl_hours()
         text = (
             f"✅ Download finished: <b>{torrent_name}</b>\n"
-            "⏳ This download will be available for 7 days.\n"
+            f"⏳ Downloaded files are stored for {retention_days} days and deleted after that.\n"
+            f"🔗 The download link will be working for {link_ttl_hours} hours.\n"
             "🔁 After the link expires, use /getdownloadlink to access the file/folder again."
         )
         if download_link_service is not None and download_link_service.is_configured():
@@ -351,7 +356,7 @@ def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
 
     return (
         f"✅ Download ready: <b>{selected_name_display}</b>\n\n"
-        f"Download link (valid for 24 hours):\n{escape(content_link)}\n\n"
+        f"Download link (valid for {get_download_link_ttl_hours()} hours):\n{escape(content_link)}\n\n"
         "Alternatively, you can download it via terminal. "
         "Run this wget script (it downloads files into your current terminal folder):\n"
         f"<pre>{escape(wget_script)}</pre>"
@@ -617,7 +622,7 @@ async def handle_myfolder(message: Message) -> None:
     user_id, _ = actor
     folder_link = download_link_service.build_user_folder_link(user_id=user_id)
     await message.answer(
-        "Your personal download folder link (valid for 24 hours):\n"
+        f"Your personal download folder link (valid for {get_download_link_ttl_hours()} hours):\n"
         f"{folder_link}\n\n"
         "This link is scoped to your Telegram user folder only."
     )
@@ -660,7 +665,7 @@ async def handle_getdownloadlink(message: Message) -> None:
         await message.answer("No finished downloads found in your folder yet.")
         return
 
-    await message.answer("Select a finished download to get its direct link (valid for 24 hours):", reply_markup=keyboard)
+    await message.answer(f"Select a finished download to get its direct link (valid for {get_download_link_ttl_hours()} hours):", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("download_link:"))
