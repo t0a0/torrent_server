@@ -11,3 +11,7 @@ venv/
 # Docker
 *.pid
 *.log
+
+# Local bind-mounted Docker state
+volumes/*
+!volumes/.gitkeep
