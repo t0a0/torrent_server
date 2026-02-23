@@ -260,7 +260,7 @@ def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _build_finished_downloads_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
+def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> InlineKeyboardMarkup | None:
     user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
     if not user_finished_root.exists() or not user_finished_root.is_dir():
         return None
@@ -275,12 +275,34 @@ def _build_finished_downloads_keyboard(user_id: int) -> InlineKeyboardMarkup | N
             [
                 InlineKeyboardButton(
                     text=_get_user_display_torrent_name(entry.name),
-                    callback_data=f"download_link:{index}",
+                    callback_data=f"{callback_prefix}:{index}",
                 )
             ]
         )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _delete_finished_download(user_id: int, selected_index: int) -> str:
+    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
+    entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
+    if selected_index < 0 or selected_index >= len(entries):
+        raise ValueError("invalid_selection")
+
+    selected_path = entries[selected_index].resolve()
+    if user_finished_root not in selected_path.parents:
+        raise ValueError("invalid_selection")
+
+    if not selected_path.exists():
+        raise FileNotFoundError("selected_download_missing")
+
+    selected_name_display = escape(_get_user_display_torrent_name(selected_path.name))
+    if selected_path.is_dir():
+        shutil.rmtree(selected_path)
+    else:
+        selected_path.unlink()
+
+    return f"🗑 Deleted: <b>{selected_name_display}</b>"
 
 
 def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
@@ -593,6 +615,26 @@ async def handle_myfolder(message: Message) -> None:
     )
 
 
+@router.message(Command("deletefiles"))
+async def handle_deletefiles(message: Message) -> None:
+    actor = await _require_whitelisted(message)
+    if actor is None:
+        return
+
+    user_id, _ = actor
+    try:
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "delete_file")
+    except ValueError:
+        await message.answer("Failed to resolve your finished downloads folder.")
+        return
+
+    if keyboard is None:
+        await message.answer("No finished downloads found in your folder yet.")
+        return
+
+    await message.answer("Select a finished download to delete:", reply_markup=keyboard)
+
+
 @router.message(Command("getdownloadlink"))
 async def handle_getdownloadlink(message: Message) -> None:
     actor = await _require_whitelisted(message)
@@ -601,7 +643,7 @@ async def handle_getdownloadlink(message: Message) -> None:
 
     user_id, _ = actor
     try:
-        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id)
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "download_link")
     except ValueError:
         await message.answer("Failed to resolve your finished downloads folder.")
         return
@@ -656,6 +698,60 @@ async def handle_download_link_click(callback_query: CallbackQuery) -> None:
         return
 
     await message.answer(reply_text, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("delete_file:"))
+async def handle_delete_file_click(callback_query: CallbackQuery) -> None:
+    message = callback_query.message
+    actor = callback_query.from_user
+    if message is None or actor is None:
+        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+        return
+
+    if not auth_service.is_whitelisted(actor.id):
+        await callback_query.answer("You are not authenticated.", show_alert=True)
+        return
+
+    callback_data = callback_query.data or ""
+    selection_token = callback_data.partition(":")[2].strip()
+    if not selection_token:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        selected_index = int(selection_token)
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        deleted_text = await asyncio.to_thread(_delete_finished_download, actor.id, selected_index)
+    except FileNotFoundError:
+        await callback_query.answer("That download no longer exists.", show_alert=True)
+        return
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+    except OSError:
+        await callback_query.answer("Failed to delete selected download.", show_alert=True)
+        return
+
+    await callback_query.answer("Deleted.")
+
+    try:
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, actor.id, "delete_file")
+    except ValueError:
+        keyboard = None
+
+    if keyboard is None:
+        await message.edit_text(f"{deleted_text}\n\nNo finished downloads left.", parse_mode="HTML")
+        return
+
+    await message.edit_text(
+        f"{deleted_text}\n\nSelect a finished download to delete:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("generateaccesstoken"))
