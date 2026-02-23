@@ -132,14 +132,15 @@ A ready-to-run `docker-compose.yml` is included for running the full stack with 
 - `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
 - `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
 
-All torrent payloads are stored in a shared Docker volume (`downloads`) mounted into both `qbittorrent` and `file-server`. The layout is split as `/downloads/active_downloads/<user_id>/...` (qBittorrent write path) and `/downloads/finished_downloads/<user_id>/...` (file-server exposed path).
+All torrent payloads are stored in a shared host bind mount (`./volumes/downloads`) mounted into both `qbittorrent` and `file-server`. The layout is split as `/downloads/active_downloads/<user_id>/...` (qBittorrent write path) and `/downloads/finished_downloads/<user_id>/...` (file-server exposed path).
 
-Auth/whitelist records are stored in a separate SQLite file on a dedicated Docker volume (`auth_data`) mounted into the `bot` service at `/auth/auth.db`.
+Auth/whitelist records are stored in a separate SQLite file on a dedicated host bind mount (`./volumes/auth`) mounted into the `bot` service at `/auth/auth.db`.
 
 ### Start
 
 ```bash
 cp .env.example .env
+mkdir -p volumes/downloads volumes/auth volumes/qbittorrent_config
 # Edit .env and set all the variables
 docker compose up -d --build
 ```
@@ -188,8 +189,8 @@ docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/finished_downloads/<
 5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
 
 Notes:
-- `/srv/downloads/finished_downloads` is the file-server document root and is mounted read-only from the shared volume.
-- Use `/downloads/finished_downloads` in `qbittorrent` for manual test writes because both containers share the same Docker volume.
+- `/srv/downloads/finished_downloads` is the file-server document root and is mounted read-only from `./volumes/downloads`.
+- Use `/downloads/finished_downloads` in `qbittorrent` for manual test writes because both containers share the same bind-mounted host path.
 
 
 ## Phase 1 command flow

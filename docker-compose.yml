@@ -9,8 +9,8 @@ services:
       - qbittorrent
       - file-server
     volumes:
-      - downloads:/downloads
-      - auth_data:/auth
+      - ./volumes/downloads:/downloads
+      - ./volumes/auth:/auth
     develop:
       watch:
         - action: sync+restart
@@ -32,8 +32,8 @@ services:
       - "6881:6881"
       - "6881:6881/udp"
     volumes:
-      - qbittorrent_config:/config
-      - downloads:/downloads
+      - ./volumes/qbittorrent_config:/config
+      - ./volumes/downloads:/downloads
     restart: unless-stopped
 
   file-server:
@@ -46,10 +46,5 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - downloads:/srv/downloads:ro
+      - ./volumes/downloads:/srv/downloads:ro
     restart: unless-stopped
-
-volumes:
-  qbittorrent_config:
-  downloads:
-  auth_data:
