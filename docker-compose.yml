@@ -48,3 +48,14 @@ services:
     volumes:
       - ./volumes/downloads:/srv/downloads:ro
     restart: unless-stopped
+
+  nginxproxymanager:
+    image: jc21/nginx-proxy-manager:latest
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - ./nginxproxymanager/data:/data
+      - ./nginxproxymanager/letsencrypt:/etc/letsencrypt
+    restart: unless-stopped
