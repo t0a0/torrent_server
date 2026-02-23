@@ -140,10 +140,19 @@ Auth/whitelist records are stored in a separate SQLite file on a dedicated host 
 
 ```bash
 cp .env.example .env
-mkdir -p volumes/downloads volumes/auth volumes/qbittorrent_config
+mkdir -p volumes/downloads volumes/auth volumes/qbittorrent_config \
+  volumes/nginxproxymanager/data volumes/nginxproxymanager/letsencrypt
 # Edit .env and set all the variables
 docker compose up -d --build
 ```
+
+Nginx Proxy Manager is exposed at:
+
+```text
+http://localhost:81
+```
+
+Default first-login credentials are documented in the official guide: https://nginxproxymanager.com/guide/
 
 ### Faster local iteration (no rebuild on every code change)
 
