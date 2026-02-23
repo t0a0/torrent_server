@@ -287,6 +287,30 @@ def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> In
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _build_finished_users_keyboard(callback_prefix: str) -> InlineKeyboardMarkup | None:
+    finished_root = get_finished_downloads_root().resolve()
+    if not finished_root.exists() or not finished_root.is_dir():
+        return None
+
+    user_dirs = sorted((entry for entry in finished_root.iterdir() if entry.is_dir()), key=lambda item: item.name)
+    if not user_dirs:
+        return None
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for user_dir in user_dirs:
+        user_id = user_dir.name
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"User {user_id}",
+                    callback_data=f"{callback_prefix}:{user_id}",
+                )
+            ]
+        )
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _delete_finished_download(user_id: int, selected_index: int) -> str:
     user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
     entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
@@ -307,6 +331,13 @@ def _delete_finished_download(user_id: int, selected_index: int) -> str:
         selected_path.unlink()
 
     return f"🗑 Deleted: <b>{selected_name_display}</b>"
+
+
+def _parse_user_id(raw_user_id: str) -> int:
+    try:
+        return int(raw_user_id)
+    except ValueError as exc:
+        raise ValueError("invalid_user_id") from exc
 
 
 def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
@@ -630,6 +661,15 @@ async def handle_deletefiles(message: Message) -> None:
         return
 
     user_id, _ = actor
+    if auth_service.is_admin(user_id=user_id):
+        keyboard = await asyncio.to_thread(_build_finished_users_keyboard, "delete_user_files")
+        if keyboard is None:
+            await message.answer("No user folders with finished downloads found.")
+            return
+
+        await message.answer("Select a user folder to manage files:", reply_markup=keyboard)
+        return
+
     try:
         keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "delete_file")
     except ValueError:
@@ -641,6 +681,48 @@ async def handle_deletefiles(message: Message) -> None:
         return
 
     await message.answer("Select a finished download to delete:", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("delete_user_files:"))
+async def handle_delete_user_files_click(callback_query: CallbackQuery) -> None:
+    message = callback_query.message
+    actor = callback_query.from_user
+    if message is None or actor is None:
+        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+        return
+
+    if not auth_service.is_admin(user_id=actor.id):
+        await callback_query.answer("This action is admin-only.", show_alert=True)
+        return
+
+    callback_data = callback_query.data or ""
+    selected_user_token = callback_data.partition(":")[2].strip()
+    if not selected_user_token:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        selected_user_id = _parse_user_id(selected_user_token)
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, selected_user_id, f"delete_admin_file:{selected_user_id}")
+    except ValueError:
+        await callback_query.answer("Failed to resolve selected user folder.", show_alert=True)
+        return
+
+    if keyboard is None:
+        await callback_query.answer("This user has no finished downloads.", show_alert=True)
+        return
+
+    await callback_query.answer()
+    await message.edit_text(
+        f"Selected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("getdownloadlink"))
@@ -757,6 +839,70 @@ async def handle_delete_file_click(callback_query: CallbackQuery) -> None:
 
     await message.edit_text(
         f"{deleted_text}\n\nSelect a finished download to delete:",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("delete_admin_file:"))
+async def handle_delete_admin_file_click(callback_query: CallbackQuery) -> None:
+    message = callback_query.message
+    actor = callback_query.from_user
+    if message is None or actor is None:
+        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+        return
+
+    if not auth_service.is_admin(user_id=actor.id):
+        await callback_query.answer("This action is admin-only.", show_alert=True)
+        return
+
+    callback_data = callback_query.data or ""
+    parts = callback_data.split(":", maxsplit=2)
+    if len(parts) != 3:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    _, selected_user_token, selection_token = parts
+
+    try:
+        selected_user_id = _parse_user_id(selected_user_token)
+        selected_index = int(selection_token)
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+
+    try:
+        deleted_text = await asyncio.to_thread(_delete_finished_download, selected_user_id, selected_index)
+    except FileNotFoundError:
+        await callback_query.answer("That download no longer exists.", show_alert=True)
+        return
+    except ValueError:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
+    except OSError:
+        await callback_query.answer("Failed to delete selected download.", show_alert=True)
+        return
+
+    await callback_query.answer("Deleted.")
+
+    try:
+        keyboard = await asyncio.to_thread(
+            _build_finished_downloads_keyboard,
+            selected_user_id,
+            f"delete_admin_file:{selected_user_id}",
+        )
+    except ValueError:
+        keyboard = None
+
+    if keyboard is None:
+        await message.edit_text(
+            f"{deleted_text}\n\nNo finished downloads left for user <code>{selected_user_id}</code>.",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.edit_text(
+        f"{deleted_text}\n\nSelected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
         reply_markup=keyboard,
         parse_mode="HTML",
     )
