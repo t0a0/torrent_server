@@ -115,20 +115,6 @@ Important notes:
 ```bash
 python3 -m app.bot.main
 ```
-
-
-For Docker Compose deployments, set:
-
-```env
-ACTIVE_DOWNLOADS_ROOT=/downloads/active_downloads
-FINISHED_DOWNLOADS_ROOT=/downloads/finished_downloads
-DOWNLOAD_RECORDS_DB_PATH=/downloads/download_records.db
-FINISHED_DOWNLOAD_RETENTION_DAYS=7
-HFS_BASE_URL=http://localhost:8081
-DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
-DOWNLOAD_LINK_TTL_SECONDS=86400
-```
-
 Generate a strong random secret for `DOWNLOAD_LINK_SECRET` (example):
 
 ```bash
