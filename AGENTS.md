@@ -16,6 +16,8 @@ Primary stack and constraints:
 - Avoid module-level cached variables for simple configuration getter calls; prefer calling small config functions at usage sites unless caching is required for correctness/performance.
 - For user-facing torrent name display, always use the final display name truncated to the first 64 characters.
 
+- For Docker bind mounts, use paths under `./volumes/...` and ensure committed placeholder files (`.gitkeep`) exist for mounted directories.
+
 ## Product roadmap context
 
 ### Phase 1 (Bot and access control)

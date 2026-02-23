@@ -56,6 +56,6 @@ services:
       - "81:81"
       - "443:443"
     volumes:
-      - ./nginxproxymanager/data:/data
-      - ./nginxproxymanager/letsencrypt:/etc/letsencrypt
+      - ./volumes/nginxproxymanager/data:/data
+      - ./volumes/nginxproxymanager/letsencrypt:/etc/letsencrypt
     restart: unless-stopped

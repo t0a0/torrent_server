@@ -141,7 +141,7 @@ Auth/whitelist records are stored in a separate SQLite file on a dedicated host 
 ```bash
 cp .env.example .env
 mkdir -p volumes/downloads volumes/auth volumes/qbittorrent_config \
-  nginxproxymanager/data nginxproxymanager/letsencrypt
+  volumes/nginxproxymanager/data volumes/nginxproxymanager/letsencrypt
 # Edit .env and set all the variables
 docker compose up -d --build
 ```
