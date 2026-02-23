@@ -74,6 +74,10 @@ def _get_user_display_torrent_name(name: str | None) -> str:
     return (name or "(unnamed torrent)")[:64]
 
 
+def _format_megabytes_per_second(download_speed_bytes_per_sec: int) -> str:
+    return f"{download_speed_bytes_per_sec / 1_000_000:.2f}"
+
+
 class _CompletionNotifier:
     def __init__(self) -> None:
         self._bot: Bot | None = None
@@ -586,8 +590,12 @@ async def handle_status(message: Message) -> None:
     for torrent in queued_torrents:
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         torrent_state = escape(torrent.state or "unknown")
+        speed_suffix = ""
+        if torrent.dlspeed_bytes_per_sec is not None:
+            speed_suffix = f" | Speed: <b>{_format_megabytes_per_second(torrent.dlspeed_bytes_per_sec)} MB/s</b>"
         lines.append(
             f"• {torrent_name} — State: <b>{torrent_state}</b> | Downloaded: <b>{torrent.progress_percent:.1f}%</b>"
+            f"{speed_suffix}"
         )
 
     await message.answer("\n".join(lines), parse_mode="HTML")
