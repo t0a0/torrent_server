@@ -23,6 +23,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="generateaccesstoken", description="Generate access token"),
     BotCommand(command="removeuser", description="Remove user from whitelist"),
     BotCommand(command="whitelist", description="Show whitelisted users"),
+    BotCommand(command="availablespace", description="Show available disk space"),
 ]
 
 

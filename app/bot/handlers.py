@@ -884,6 +884,16 @@ async def handle_whitelist(message: Message) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.message(Command("availablespace"))
+async def handle_availablespace(message: Message) -> None:
+    if await _require_admin(message) is None:
+        return
+
+    usage = shutil.disk_usage(get_finished_downloads_root())
+    available_gb = usage.free / (1024 ** 3)
+    await message.answer(f"Available disk space: {available_gb:.2f} GB")
+
+
 @router.message()
 async def handle_queue_download_input(message: Message) -> None:
     actor = _get_actor(message)
