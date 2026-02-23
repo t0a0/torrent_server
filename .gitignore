@@ -15,4 +15,3 @@ venv/
 # Local bind-mounted Docker state
 volumes/*
 !volumes/.gitkeep
-!volumes/**/.gitkeep
