@@ -29,7 +29,7 @@
    BOT_OWNER_USER_ID=123456789
    HFS_BASE_URL=https://files.example.com
    DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
-   DOWNLOAD_LINK_TTL_SECONDS=86400
+   DOWNLOAD_LINK_TTL_HOURS=24
    AUTH_DB_PATH=auth.db
    ```
 
@@ -233,7 +233,7 @@ This is applied automatically in `run_bot()` before polling starts.
 Security behavior:
 - The bot only serves `/myfolder` to whitelisted users.
 - The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
-- Links expire after `DOWNLOAD_LINK_TTL_SECONDS` (default 86400 seconds (24 hours)).
+- Links expire after `DOWNLOAD_LINK_TTL_HOURS` (default 24 hours).
 - The folder mapping is fixed to `finished_downloads/<user_id>/`, so user `123` only gets links to `finished_downloads/123/`.
 
 > Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.

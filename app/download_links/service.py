@@ -13,7 +13,7 @@ from urllib.parse import quote, urlencode
 
 from .config import (
     get_download_link_secret,
-    get_download_link_ttl_seconds,
+    get_download_link_ttl_hours,
     get_finished_downloads_root,
     get_hfs_base_url,
 )
@@ -36,14 +36,14 @@ class DownloadLinkService:
         self,
         hfs_base_url: str | None = None,
         signing_secret: str | None = None,
-        ttl_seconds: int | None = None,
+        ttl_hours: int | None = None,
         finished_downloads_root: Path | None = None,
     ) -> None:
         self._hfs_base_url = hfs_base_url if hfs_base_url is not None else get_hfs_base_url()
         self._signing_secret = (
             signing_secret if signing_secret is not None else get_download_link_secret()
         )
-        self._ttl_seconds = ttl_seconds if ttl_seconds is not None else get_download_link_ttl_seconds()
+        self._ttl_hours = ttl_hours if ttl_hours is not None else get_download_link_ttl_hours()
         self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
 
     def is_configured(self) -> bool:
@@ -106,7 +106,7 @@ class DownloadLinkService:
         return hmac.compare_digest(expected, signature)
 
     def _build_signed_payload(self, user_id: int) -> SignedFolderLink:
-        expires = int((datetime.now(timezone.utc) + timedelta(seconds=self._ttl_seconds)).timestamp())
+        expires = int((datetime.now(timezone.utc) + timedelta(hours=self._ttl_hours)).timestamp())
         nonce = base64.urlsafe_b64encode(secrets.token_bytes(18)).decode("ascii").rstrip("=")
         signature = self._build_signature(user_id=user_id, expires=expires, nonce=nonce)
         return SignedFolderLink(
