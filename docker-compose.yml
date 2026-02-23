@@ -11,13 +11,6 @@ services:
     volumes:
       - downloads:/downloads
       - auth_data:/auth
-    environment:
-      ACTIVE_DOWNLOADS_ROOT: /downloads/active_downloads
-      FINISHED_DOWNLOADS_ROOT: /downloads/finished_downloads
-      DOWNLOAD_RECORDS_DB_PATH: /downloads/download_records.db
-      FINISHED_DOWNLOAD_RETENTION_DAYS: 7
-      QBITTORRENT_URL: http://qbittorrent:8080
-      AUTH_DB_PATH: /auth/auth.db
     develop:
       watch:
         - action: sync+restart
@@ -48,12 +41,12 @@ services:
       context: ./docker/file-server
     depends_on:
       - qbittorrent
+    env_file:
+      - .env
     ports:
       - "8081:8081"
     volumes:
       - downloads:/srv/downloads:ro
-    environment:
-      DOWNLOAD_LINK_SECRET: ${DOWNLOAD_LINK_SECRET}
     restart: unless-stopped
 
 volumes:
