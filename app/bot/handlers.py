@@ -325,7 +325,7 @@ def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
 
     return (
         f"✅ Download ready: <b>{selected_name_display}</b>\n\n"
-        f"Download link:\n{escape(content_link)}\n\n"
+        f"Download link (valid for 24 hours):\n{escape(content_link)}\n\n"
         "Alternatively, you can download it via terminal. "
         "Run this wget script (it downloads files into your current terminal folder):\n"
         f"<pre>{escape(wget_script)}</pre>"
@@ -587,7 +587,7 @@ async def handle_myfolder(message: Message) -> None:
     user_id, _ = actor
     folder_link = download_link_service.build_user_folder_link(user_id=user_id)
     await message.answer(
-        "Your personal download folder link (expires automatically):\n"
+        "Your personal download folder link (valid for 24 hours):\n"
         f"{folder_link}\n\n"
         "This link is scoped to your Telegram user folder only."
     )
@@ -610,7 +610,7 @@ async def handle_getdownloadlink(message: Message) -> None:
         await message.answer("No finished downloads found in your folder yet.")
         return
 
-    await message.answer("Select a finished download to get its direct link:", reply_markup=keyboard)
+    await message.answer("Select a finished download to get its direct link (valid for 24 hours):", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("download_link:"))

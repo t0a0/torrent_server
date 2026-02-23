@@ -32,9 +32,9 @@ def get_download_link_secret() -> str:
 
 
 def get_download_link_ttl_seconds() -> int:
-    """Resolve link TTL in seconds, defaulting to 30 minutes."""
+    """Resolve link TTL in seconds, defaulting to 24 hours."""
     load_env_file()
-    raw_ttl = os.getenv(_DOWNLOAD_LINK_TTL_SECONDS_KEY, "1800")
+    raw_ttl = os.getenv(_DOWNLOAD_LINK_TTL_SECONDS_KEY, "86400")
     try:
         ttl_seconds = int(raw_ttl)
     except ValueError as exc:
