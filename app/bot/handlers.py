@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from html import escape
 import logging
+import os
 import secrets
 import shlex
 import shutil
@@ -76,6 +77,26 @@ def _get_user_display_torrent_name(name: str | None) -> str:
 
 def _format_megabytes_per_second(download_speed_bytes_per_sec: int) -> str:
     return f"{download_speed_bytes_per_sec / 1_000_000:.2f}"
+
+
+def _get_path_size_bytes(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+
+    total_size = 0
+    for root, _, files in os.walk(path):
+        for file_name in files:
+            file_path = Path(root) / file_name
+            try:
+                total_size += file_path.stat().st_size
+            except OSError:
+                logger.warning("Failed to resolve size for path '%s'", file_path)
+    return total_size
+
+
+def _format_size_gb(path: Path) -> str:
+    size_gb = _get_path_size_bytes(path) / (1024 ** 3)
+    return f"{size_gb:.2f} GB"
 
 
 class _CompletionNotifier:
@@ -278,7 +299,7 @@ def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> In
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=_get_user_display_torrent_name(entry.name),
+                    text=f"{_get_user_display_torrent_name(entry.name)} ({_format_size_gb(entry)})",
                     callback_data=f"{callback_prefix}:{index}",
                 )
             ]
