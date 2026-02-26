@@ -1,290 +1,148 @@
-# Torrent Server Bot
+# Torrent Server + Telegram Bot
 
-## Running the bot
+This project runs a Telegram bot that can queue torrents in qBittorrent, track progress, and provide download links for completed files via an HTTP file server.
 
-1. Create a Python virtual environment:
-   ```bash
-   python3 -m venv .venv
-   ```
+## Prerequisite
 
-2. Activate the virtual environment:
-   ```bash
-   source .venv/bin/activate
-   ```
+- **Docker + Docker Compose must be installed**.
 
-3. Install dependencies:
-   ```bash
-   pip install --upgrade pip
-   pip install aiogram python-qbittorrent
-   ```
+> This README assumes you run everything with `docker compose`.
 
-4. Create your local environment file:
+## Quick start
+
+1. **Clone the repository** and enter it.
+2. **Create your runtime env file**:
+
    ```bash
    cp .env.example .env
    ```
 
-5. Edit `.env` and set your Telegram bot settings:
-   ```env
-   TELEGRAM_BOT_TOKEN=your_real_bot_token
-   BOT_OWNER_USER_ID=123456789
-   HFS_BASE_URL=https://files.example.com
-   DOWNLOAD_LINK_SECRET=replace_with_long_random_secret
-   DOWNLOAD_LINK_TTL_HOURS=24
-   AUTH_DB_PATH=auth.db
-   ```
+3. **Fill in `.env`** (see [Environment variables](#environment-variables)).
+4. **Create required bind-mount directories**:
 
-6. Start the bot:
    ```bash
-   python3 -m app.bot.main
+   mkdir -p \
+     volumes/downloads \
+     volumes/auth \
+     volumes/qbittorrent_config \
+     volumes/nginxproxymanager/data \
+     volumes/nginxproxymanager/letsencrypt
    ```
 
+5. **Start services**:
 
+   ```bash
+   docker compose up -d --build
+   ```
 
-## Auth persistence (SQLite)
+6. **Handle first qBittorrent login/password initialization** (important):
+   - On first launch, qBittorrent logs a **temporary admin password**.
+   - Read it with:
 
-Whitelist/auth data is persisted in an SQLite database instead of in-memory state.
+     ```bash
+     docker compose logs qbittorrent | rg -i "temporary password|admin password|password"
+     ```
 
-- The bot reads the database location from `AUTH_DB_PATH` (default: `auth.db`).
-- In Docker Compose, the bot stores this file at `/auth/auth.db` on a dedicated `auth_data` volume.
-- Recreating/updating the bot container keeps whitelist data as long as the `auth_data` volume is preserved.
+   - Open qBittorrent Web UI (`http://localhost:8080`) and sign in with the temporary password.
+   - Change username/password in qBittorrent Web UI to match your `.env` values:
+     - `QBITTORRENT_USERNAME`
+     - `QBITTORRENT_PASSWORD`
 
-## Running qBittorrent (required for Phase 2)
+7. **Restart containers after changing qBittorrent credentials**:
+   - Recommended because the bot initializes its torrent service on startup and may attempt login before qBittorrent has fully persisted updated credentials.
 
-The Telegram bot and qBittorrent run as separate processes. Start qBittorrent first, then start the bot.
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
 
-### Local macOS
+## Environment variables
 
-1. Install and open qBittorrent (GUI app).
-2. In qBittorrent settings, enable Web UI (HTTP API).
-3. Configure host/port/credentials (example: `127.0.0.1:8080`).
-4. Set matching values in `.env`:
+Rename `.env.example` to `.env` and fill all values.
 
-```env
-QBITTORRENT_URL=http://127.0.0.1:8080
-QBITTORRENT_USERNAME=<your_webui_username>
-QBITTORRENT_PASSWORD=<your_webui_password>
-ACTIVE_DOWNLOADS_ROOT=active_downloads
-FINISHED_DOWNLOADS_ROOT=finished_downloads
-DOWNLOAD_RECORDS_DB_PATH=download_records.db
-FINISHED_DOWNLOAD_RETENTION_DAYS=7
-```
+| Variable | Required | What it is for |
+|---|---:|---|
+| `TELEGRAM_BOT_TOKEN` | Yes | Telegram Bot API token from BotFather. |
+| `BOT_OWNER_USER_ID` | Yes | Telegram `user_id` of the bot owner/admin (allowed to run admin-only commands). |
+| `QBITTORRENT_URL` | Yes | qBittorrent Web UI/API URL used by the bot (for Docker Compose default: `http://qbittorrent:8080`). |
+| `QBITTORRENT_USERNAME` | Yes | qBittorrent Web UI username used by the bot API client. |
+| `QBITTORRENT_PASSWORD` | Yes | qBittorrent Web UI password used by the bot API client. |
+| `TORRENT_INPUT_TMP_DIR` | Yes | Temp folder inside the bot container for uploaded `.torrent` files before queueing. |
+| `AUTH_DB_PATH` | Yes | SQLite file path for whitelist/auth data (default compose path: `/auth/auth.db`). |
+| `ACTIVE_DOWNLOADS_ROOT` | Yes | Path where in-progress torrent data is stored. |
+| `FINISHED_DOWNLOADS_ROOT` | Yes | Path where completed downloads are stored (served by file server). |
+| `DOWNLOAD_RECORDS_DB_PATH` | Yes | SQLite path used to track download records/metadata. |
+| `FINISHED_DOWNLOAD_RETENTION_DAYS` | Yes | Retention period for completed downloads/records. |
+| `HFS_BASE_URL` | Yes | **Base URL for the file server** used when generating user download links. |
+| `DOWNLOAD_LINK_SECRET` | Yes | Secret used to sign generated download links. Use a long random value. |
+| `DOWNLOAD_LINK_TTL_SECONDS` | Yes | Link expiration time (in seconds) for generated download links. |
 
-### VPS (Docker example)
+## Services in `docker-compose.yml`
 
-```bash
-docker run -d \
-  --name qbittorrent \
-  -e PUID=1000 \
-  -e PGID=1000 \
-  -e TZ=UTC \
-  -e WEBUI_PORT=8080 \
-  -p 8080:8080 \
-  -p 6881:6881 \
-  -p 6881:6881/udp \
-  -v /opt/qbit/config:/config \
-  -v /opt/qbit/downloads:/downloads \
-  --restart unless-stopped \
-  lscr.io/linuxserver/qbittorrent:latest
-```
+- `bot`: Telegram bot application.
+- `qbittorrent`: torrent engine + Web UI.
+- `file-server`: serves completed downloads over HTTP.
+- `nginxproxymanager`: reverse proxy manager that can be used for HTTPS/SSL and routing.
 
-After container startup, open `http://<vps_ip>:8080`, configure credentials, and copy the same values into `.env`.
+### Why `nginxproxymanager` is included
 
-### qBittorrent first-start credentials and bot login behavior
+`nginxproxymanager` is included for **potential SSL enforcement** and URL routing, including:
+- redirecting custom domain URLs to qBittorrent Web UI,
+- redirecting custom domain URLs to the HFS/file-server endpoint,
+- optionally enforcing HTTP → HTTPS.
 
-If you use `lscr.io/linuxserver/qbittorrent`, first container boot prints a **temporary WebUI password** in logs.
-That temporary password is only for initial setup. After you sign in and set your own password in qBittorrent WebUI,
-store that final username/password in `.env` as:
+Default Nginx Proxy Manager admin UI: `http://localhost:81`.
 
-```env
-QBITTORRENT_USERNAME=admin
-QBITTORRENT_PASSWORD=<your_final_password>
-```
+## qBittorrent first-run notes
 
-Important notes:
-- The image does not provide a stable "set WebUI username/password via env" mechanism for this project.
-- The password you set in WebUI is persisted under the mounted `/config` volume, so you only do this once per config volume.
-- The bot authenticates lazily: it checks/login when a torrent API call is made. This avoids startup coupling to qBittorrent readiness.
-- Yes, qBittorrent API sessions can expire (cookie/session timeout or container restart). The bot handles this by re-authenticating when `LoginRequired` is raised.
+- The LinuxServer qBittorrent container emits a temporary admin password on first startup.
+- You must use that password once to log in and set your final credentials.
+- After setting final credentials, restart the full compose stack so the bot consistently authenticates with the updated values.
 
-### Start the full stack
+## Available bot commands
 
-1. Start qBittorrent Web UI/API (local app or VPS container).
-2. Start the bot:
+### General
+- `/start` — entry command.
+- `/authenticate <token>` — authenticate and join whitelist.
+- `/cancel` — cancel the currently pending multi-step command input.
 
-```bash
-python3 -m app.bot.main
-```
-Generate a strong random secret for `DOWNLOAD_LINK_SECRET` (example):
+### Whitelisted users
+- `/queuedownload` — queue a torrent file or magnet link.
+- `/status` — view current torrent progress.
+- `/canceldownload` — cancel and remove an active download.
+- `/getdownloadlink` — get a link for a finished download.
+- `/deletefiles` — delete finished downloads.
+- `/myfolder` — get your personal folder link.
 
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+### Admin only (owner)
+- `/generateaccesstoken` — generate one-time authentication token.
+- `/removeuser <user_id>` — remove a user from whitelist.
+- `/whitelist` — list whitelisted users.
+- `/availablespace` — show available disk space.
 
+## Common operations
 
-## Docker Compose stack (bot + qBittorrent + HFS file-server)
-
-A ready-to-run `docker-compose.yml` is included for running the full stack with a dedicated **file-server container** that exposes downloaded files over HTTP.
-
-### Services
-
-- `bot`: Telegram bot process (`python -m app.bot.main`).
-- `qbittorrent`: torrent engine and Web UI (`http://localhost:8080`).
-- `file-server`: NGINX-based HFS (HTTP file server) exposing the shared downloads volume (`http://localhost:8081`).
-
-All torrent payloads are stored in a shared host bind mount (`./volumes/downloads`) mounted into both `qbittorrent` and `file-server`. The layout is split as `/downloads/active_downloads/<user_id>/...` (qBittorrent write path) and `/downloads/finished_downloads/<user_id>/...` (file-server exposed path).
-
-Auth/whitelist records are stored in a separate SQLite file on a dedicated host bind mount (`./volumes/auth`) mounted into the `bot` service at `/auth/auth.db`.
-
-### Start
+Start/restart:
 
 ```bash
-cp .env.example .env
-mkdir -p volumes/downloads volumes/auth volumes/qbittorrent_config \
-  volumes/nginxproxymanager/data volumes/nginxproxymanager/letsencrypt
-# Edit .env and set all the variables
 docker compose up -d --build
 ```
 
-Nginx Proxy Manager is exposed at:
-
-```text
-http://localhost:81
-```
-
-Default first-login credentials are documented in the official guide: https://nginxproxymanager.com/guide/
-
-### Faster local iteration (no rebuild on every code change)
-
-For day-to-day bot development, use Docker Compose Watch to sync `./app` changes into the running `bot` container and restart only that service process:
+Stop:
 
 ```bash
-docker compose watch bot
+docker compose down
 ```
 
-Notes:
-- Keep `docker compose up -d` running in another terminal.
-- `docker compose up` **alone** does not enable live syncing/restart behavior.
-- You generally do **not** need to toggle anything in Docker Desktop settings for this project-specific workflow.
-- Changes under `./app` are synced with `sync+restart` behavior.
-- Changes to `Dockerfile` trigger a rebuild for `bot`.
-
-If hot reload seems broken, first confirm the watch process is actually running:
+View logs:
 
 ```bash
-docker compose watch bot
 docker compose logs -f bot
+docker compose logs -f qbittorrent
 ```
 
-Then edit a file under `./app` and verify the bot service restarts.
+## Notes
 
-Once torrents are downloaded, files become browseable via the file server at:
-
-```text
-http://localhost:8081/<telegram_user_id>/
-```
-
-### Local end-to-end smoke test for `/myfolder`
-
-1. Bring up the stack (`docker compose up -d --build`).
-2. In Telegram, authenticate a user (`/generateaccesstoken` then `/authenticate <token>`).
-3. Run `/myfolder` and copy the returned signed URL.
-4. Create a test file in that user's folder via the **write-capable** qBittorrent container:
-
-```bash
-docker compose exec qbittorrent sh -lc 'mkdir -p /downloads/finished_downloads/<telegram_user_id> && echo hello > /downloads/finished_downloads/<telegram_user_id>/test.txt'
-```
-
-5. Open the `/myfolder` URL in a browser and confirm `test.txt` appears.
-
-Notes:
-- `/srv/downloads/finished_downloads` is the file-server document root and is mounted read-only from `./volumes/downloads`.
-- Use `/downloads/finished_downloads` in `qbittorrent` for manual test writes because both containers share the same bind-mounted host path.
-
-
-## Phase 1 command flow
-
-- `/generateaccesstoken` (admin only): creates a secure, single-use token valid for 30 minutes.
-- `/authenticate <token>`: redeems token, whitelists caller by Telegram `user_id`, and stores username at authentication time.
-- `/whitelist` (admin only): lists whitelisted users.
-- `/removeuser <user_id>` (admin only): removes a user from whitelist.
-- `/start`: available to everyone, but non-whitelisted users are prompted to authenticate first.
-- `/queuedownload`: available only for whitelisted users.
-- `/canceldownload`: available only for whitelisted users; lets the user pick an active torrent and cancel/delete it (including downloaded files).
-- `/myfolder`: available only for whitelisted users; returns an expiring signed HTTPS link to `finished_downloads/<user_id>/`.
-
-## Telegram command menu
-
-The bot now configures Telegram command menus programmatically at startup:
-
-- Non-whitelisted users see: `/start`, `/authenticate`.
-- Whitelisted users see: `/start`, `/queuedownload`, `/canceldownload`, `/myfolder` (without `/authenticate`).
-- Owner chat (using `BOT_OWNER_USER_ID`) gets whitelisted commands plus admin commands via `BotCommandScopeChat`: `/generateaccesstoken`, `/removeuser`, `/whitelist`.
-- Menus are updated dynamically when a user authenticates or is removed from whitelist.
-
-This is applied automatically in `run_bot()` before polling starts.
-
-
-
-
-## HFS per-user folder links
-
-`/myfolder` generates an expiring signed URL for the caller only. The URL path is always `<HFS_BASE_URL>/<telegram_user_id>/` and includes `expires`, `nonce`, and `sig` query params.
-
-Security behavior:
-- The bot only serves `/myfolder` to whitelisted users.
-- The link signature is NGINX `secure_link` compatible (`MD5` + base64url) over `expires + uri + nonce + " " + DOWNLOAD_LINK_SECRET`.
-- Links expire after `DOWNLOAD_LINK_TTL_HOURS` (default 24 hours).
-- The folder mapping is fixed to `finished_downloads/<user_id>/`, so user `123` only gets links to `finished_downloads/123/`.
-
-> Deploy HFS behind HTTPS as planned. The generated links are intended for HTTPS public exposure.
-
-NGINX now enforces both signature and expiry checks at request time, returning `403` for invalid signatures and `410` for expired links.
-
-## Phase 2 torrent service primitives
-
-A qBittorrent-backed service now lives in `app/torrent/service.py` with two methods:
-
-- `start_download_from_file_bytes(user_id, torrent_file_bytes)`
-- `start_download_from_magnet_url(user_id, magnet_url)`
-
-Both methods queue payloads into `ACTIVE_DOWNLOADS_ROOT/<user_id>/...` and move completed files into `FINISHED_DOWNLOADS_ROOT/<user_id>/...`.
-
-When a torrent is moved into `FINISHED_DOWNLOADS_ROOT`, the bot also stores a download record in SQLite (`DOWNLOAD_RECORDS_DB_PATH`, default `download_records.db`) with:
-
-- Telegram `user_id`
-- moved content path
-- move timestamp
-- torrent hash
-
-The torrent service runs an hourly retention cleanup loop (configured by `FINISHED_DOWNLOAD_RETENTION_DAYS`, default `7`) that:
-
-- removes files/folders older than 7 days,
-- removes their matching SQLite records,
-- removes stale records if the stored path no longer exists on disk.
-
-The service also runs a background cleanup loop that automatically removes completed torrents from the qBittorrent queue (for all users) to stop seeding. Downloaded files are kept on disk (`delete_files=False`). The cleanup interval defaults to 30 seconds.
-
-
-## Phase 3 `/queuedownload` validation and queue flow
-
-- `/queuedownload` now starts an input session and prompts user to paste a magnet URL or upload a `.torrent` file.
-- Both input types go through validation gates (size, structure, btih parsing/normalization, and dedupe checks).
-- Valid payloads are queued via qBittorrent into `ACTIVE_DOWNLOADS_ROOT/<telegram_user_id>/` and served from `FINISHED_DOWNLOADS_ROOT/<telegram_user_id>/` after completion.
-- Duplicate/invalid/backend errors are mapped to stable user-safe bot messages.
-
-## `/status` live progress behavior
-
-- `/status` is available to whitelisted users and reports active queued/downloading torrents scoped to the caller `user_id`.
-- Progress percentages are read live from qBittorrent torrent state (`progress` 0..1 => 0..100%).
-- No in-memory dictionary is required for status tracking.
-- No SQLite status table is required for live status tracking.
-- If product requirements later need history/audit (for example, recent completed torrents), that can be persisted separately while keeping live progress sourced from qBittorrent.
-- Uploaded `.torrent` files are stored in a temporary path (`TORRENT_INPUT_TMP_DIR`) and always removed after processing.
-
-### Troubleshooting: `file_open ... Permission denied` in qBittorrent
-
-If qBittorrent reports a permission error under `/downloads/active_downloads/<telegram_user_id>/...`, ensure qBittorrent can create/write that active folder itself and avoid bot-side pre-creation with a mismatched user.
-
-Current behavior avoids pre-creating user subfolders from the bot side; qBittorrent creates/uses the save path itself. For already-created folders, fix ownership/permissions on the shared downloads volume so qBittorrent can write there.
-
-Global upload limit is currently fixed at `1048576` bytes/sec (1 MiB/s) as an internal constant. On service startup, the bot applies this value to qBittorrent via the Web API preferences (`up_limit`).
+- Keep your `.env` out of version control.
+- Use strong secrets/passwords in production.
+- If you put qBittorrent and file server behind a public domain, configure TLS via `nginxproxymanager`.
