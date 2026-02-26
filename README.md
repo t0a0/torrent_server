@@ -77,6 +77,12 @@ Rename `.env.example` to `.env` and fill all values.
 | `DOWNLOAD_LINK_SECRET` | Yes | Secret used to sign generated download links. Use a long random value. |
 | `DOWNLOAD_LINK_TTL_SECONDS` | Yes | Link expiration time (in seconds) for generated download links. |
 
+Generate a strong value for `DOWNLOAD_LINK_SECRET` (example):
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
 ## Services in `docker-compose.yml`
 
 - `bot`: Telegram bot application.
