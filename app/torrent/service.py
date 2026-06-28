@@ -18,6 +18,7 @@ from qbittorrent.client import LoginRequired
 from .config import (
     get_active_downloads_root,
     get_download_records_db_path,
+    get_downloads_root,
     get_finished_download_retention_days,
     get_finished_downloads_root,
     get_qbittorrent_password,
@@ -82,6 +83,8 @@ class TorrentService:
         qbittorrent_password: str | None = None,
         finished_downloads_root: Path | None = None,
         active_downloads_root: Path | None = None,
+        downloads_root: Path | None = None,
+        default_owner_user_id: int | None = None,
         completion_poll_interval_seconds: float = 30.0,
         retention_poll_interval_seconds: float = 60.0 * 60.0,
         on_torrent_completed: Callable[[CompletedTorrent], None] | None = None,
@@ -92,6 +95,8 @@ class TorrentService:
         self._retention_poll_interval_seconds = max(retention_poll_interval_seconds, 1.0)
         self._finished_downloads_root = (finished_downloads_root or get_finished_downloads_root()).resolve()
         self._active_downloads_root = (active_downloads_root or get_active_downloads_root()).resolve()
+        self._downloads_root = (downloads_root or get_downloads_root()).resolve()
+        self._default_owner_user_id = default_owner_user_id
         self._client = Client(qbittorrent_url or get_qbittorrent_url())
         self._username = (
             qbittorrent_username if qbittorrent_username is not None else get_qbittorrent_username()
@@ -323,6 +328,13 @@ class TorrentService:
 
             torrent_name = torrent.get("name") if isinstance(torrent.get("name"), str) else None
             completed_torrent_user_id = self._extract_user_id_from_torrent(torrent)
+            if completed_torrent_user_id is None and self._default_owner_user_id is not None:
+                completed_torrent_user_id = self._default_owner_user_id
+                self._logger.info(
+                    "Torrent '%s' has no user id in its save path; attributing to owner %s",
+                    torrent_hash,
+                    self._default_owner_user_id,
+                )
             completed_content_path = self._extract_completed_content_path(torrent)
             moved_content_path = self._move_completed_payload_to_downloads(
                 completed_content_path=completed_content_path,
@@ -414,7 +426,12 @@ class TorrentService:
             return None
 
     def _extract_completed_content_path(self, torrent: dict[str, Any]) -> Path | None:
-        """Resolve finished payload path from qBittorrent `content_path` when available."""
+        """Resolve finished payload path from qBittorrent `content_path` when available.
+
+        Accepts payloads under `active_downloads` (bot-queued) as well as the broader
+        `downloads_root` (queued directly via the qBittorrent Web UI), but never the
+        finished-downloads destination, so already-moved files are not re-processed.
+        """
         content_path = torrent.get("content_path")
         if not isinstance(content_path, str) or not content_path:
             return None
@@ -424,12 +441,27 @@ class TorrentService:
         except OSError:
             return None
 
-        if resolved_content_path == self._active_downloads_root:
-            return None
-        if self._active_downloads_root not in resolved_content_path.parents:
+        if not self._is_within_managed_downloads(resolved_content_path):
             return None
 
         return resolved_content_path
+
+    def _is_within_managed_downloads(self, content_path: Path) -> bool:
+        """Return True when a payload path is eligible to be moved into finished downloads."""
+        if content_path in (
+            self._active_downloads_root,
+            self._downloads_root,
+            self._finished_downloads_root,
+        ):
+            return False
+
+        if self._finished_downloads_root in content_path.parents:
+            return False
+
+        return (
+            self._active_downloads_root in content_path.parents
+            or self._downloads_root in content_path.parents
+        )
 
 
     def _move_completed_payload_to_downloads(

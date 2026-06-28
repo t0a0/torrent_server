@@ -10,6 +10,7 @@ _QBIT_USERNAME_KEY = "QBITTORRENT_USERNAME"
 _QBIT_PASSWORD_KEY = "QBITTORRENT_PASSWORD"
 _ACTIVE_DOWNLOADS_ROOT_KEY = "ACTIVE_DOWNLOADS_ROOT"
 _FINISHED_DOWNLOADS_ROOT_KEY = "FINISHED_DOWNLOADS_ROOT"
+_DOWNLOADS_ROOT_KEY = "DOWNLOADS_ROOT"
 _TORRENT_INPUT_TMP_DIR_KEY = "TORRENT_INPUT_TMP_DIR"
 _DOWNLOAD_RECORDS_DB_PATH_KEY = "DOWNLOAD_RECORDS_DB_PATH"
 _FINISHED_DOWNLOAD_RETENTION_DAYS_KEY = "FINISHED_DOWNLOAD_RETENTION_DAYS"
@@ -56,6 +57,18 @@ def get_active_downloads_root() -> Path:
     """Resolve local active-downloads root path used for qBittorrent save paths."""
     load_env_file()
     root = os.getenv(_ACTIVE_DOWNLOADS_ROOT_KEY, "active_downloads")
+    return Path(root)
+
+
+def get_downloads_root() -> Path:
+    """Resolve the broader downloads root that qBittorrent saves into.
+
+    Used to sweep up torrents queued directly via the qBittorrent Web UI (which
+    save outside `active_downloads`) so the completion worker still moves and
+    exposes them under the owner's finished-downloads folder.
+    """
+    load_env_file()
+    root = os.getenv(_DOWNLOADS_ROOT_KEY, "/downloads")
     return Path(root)
 
 

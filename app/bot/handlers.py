@@ -425,6 +425,7 @@ def _build_download_link_service() -> DownloadLinkService | None:
 def _build_torrent_service() -> TorrentService | None:
     try:
         return TorrentService(
+            default_owner_user_id=get_owner_user_id(),
             on_torrent_completed=completion_notifier.on_torrent_completed,
             on_torrent_failed=completion_notifier.on_torrent_failed,
         )
