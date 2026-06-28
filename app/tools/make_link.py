@@ -5,6 +5,10 @@ cannot deliver the link itself. The completion worker still moves finished paylo
 into ``finished_downloads/<user_id>/``; this tool produces a browsable link to that
 folder using the same signing logic the bot uses.
 
+It prints the signed folder link followed by a ``wget`` command that downloads the
+whole folder into the current directory -- the same terminal command the Telegram
+bot offers for directory downloads.
+
 Usage:
     python -m app.tools.make_link [user_id]
 
@@ -34,6 +38,20 @@ def _get_owner_user_id() -> int | None:
         return int(raw_user_id)
     except ValueError as exc:
         raise ValueError(f"Invalid integer in {_OWNER_USER_ID_KEY}: {raw_user_id}") from exc
+
+
+def _build_folder_wget_script(folder_link: str) -> str:
+    """Mirror the Telegram bot's directory `wget` command for a folder link.
+
+    The folder link already ends with `/` before its query string, so it is used
+    as-is (no trailing-slash fix-up needed).
+    """
+    return (
+        "wget --recursive --no-parent --no-host-directories --cut-dirs=1 "
+        '--reject "index.html*" "'
+        f"{folder_link}"
+        '"'
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -71,7 +89,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(service.build_user_folder_link(user_id=user_id))
+    folder_link = service.build_user_folder_link(user_id=user_id)
+    print(folder_link)
+    print()
+    print("# Download everything in this folder into the current directory:")
+    print(_build_folder_wget_script(folder_link))
     return 0
 
 
