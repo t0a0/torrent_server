@@ -71,11 +71,12 @@ Rename `.env.example` to `.env` and fill all values.
 | `AUTH_DB_PATH` | Yes | SQLite file path for whitelist/auth data (default compose path: `/auth/auth.db`). |
 | `ACTIVE_DOWNLOADS_ROOT` | Yes | Path where in-progress torrent data is stored. |
 | `FINISHED_DOWNLOADS_ROOT` | Yes | Path where completed downloads are stored (served by file server). |
+| `DOWNLOADS_ROOT` | No | Broader root qBittorrent saves into (default `/downloads`). Torrents queued directly via the qBittorrent Web UI are swept up from here and moved under `FINISHED_DOWNLOADS_ROOT/<BOT_OWNER_USER_ID>/`. See [Queueing without Telegram](#queueing-without-telegram-fallback). |
 | `DOWNLOAD_RECORDS_DB_PATH` | Yes | SQLite path used to track download records/metadata. |
 | `FINISHED_DOWNLOAD_RETENTION_DAYS` | Yes | Retention period for completed downloads/records. |
 | `HFS_BASE_URL` | Yes | **Base URL for the file server** used when generating user download links. |
 | `DOWNLOAD_LINK_SECRET` | Yes | Secret used to sign generated download links. Use a long random value. |
-| `DOWNLOAD_LINK_TTL_SECONDS` | Yes | Link expiration time (in seconds) for generated download links. |
+| `DOWNLOAD_LINK_TTL_HOURS` | No | Link expiration time in hours for generated download links (default `24`). |
 
 Generate a strong value for `DOWNLOAD_LINK_SECRET` (example):
 
@@ -125,6 +126,35 @@ Default Nginx Proxy Manager admin UI: `http://localhost:81`.
 - `/removeuser <user_id>` — remove a user from whitelist.
 - `/whitelist` — list whitelisted users.
 - `/availablespace` — show available disk space.
+
+## Queueing without Telegram (fallback)
+
+If Telegram is unreachable (for example blocked at the network edge), the bot cannot
+receive commands or deliver links — but the background worker that moves and exposes
+finished downloads keeps running, because it only talks to qBittorrent locally. You can
+still queue and retrieve downloads:
+
+1. **Queue the torrent in the qBittorrent Web UI** (`http://localhost:8080`). Either:
+   - set **Save files to location** to `${ACTIVE_DOWNLOADS_ROOT}/<your_telegram_user_id>` to attribute it to a specific user, or
+   - just queue it with the default save location — anything under `DOWNLOADS_ROOT` is automatically attributed to `BOT_OWNER_USER_ID`.
+
+2. **Wait for completion.** The worker moves the payload into
+   `FINISHED_DOWNLOADS_ROOT/<user_id>/` and exposes it through the file server, exactly
+   as it does for bot-queued torrents.
+
+3. **Generate a download link from the command line** (since the bot can't send it):
+
+   ```bash
+   # Link to the owner's folder (uses BOT_OWNER_USER_ID):
+   docker compose exec bot python -m app.tools.make_link
+
+   # Or link to a specific user's folder:
+   docker compose exec bot python -m app.tools.make_link <user_id>
+   ```
+
+   This prints an expiring signed link to that user's folder. The file server has
+   directory listing enabled and sets an auth cookie, so a single folder link lets you
+   browse and download everything under it until the link expires.
 
 ## Common operations
 
