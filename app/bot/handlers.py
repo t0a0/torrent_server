@@ -1,4 +1,4 @@
-"""Phase 3 bot command handlers."""
+"""Bot command handlers (Telethon)."""
 
 from __future__ import annotations
 
@@ -12,13 +12,12 @@ import shutil
 import time
 from pathlib import Path
 
-from aiogram import Bot, F, Router
-from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telethon import Button, TelegramClient, events
 
 from .auth import AuthService
 from .commands import setup_non_whitelisted_commands, setup_whitelisted_commands
 from .config import get_auth_db_path, get_owner_user_id
+from .routing import Router, command_args
 from app.download_links import DownloadLinkService
 from app.download_links.config import get_download_link_ttl_hours
 from app.torrent import CompletedTorrent, FailedTorrent, TorrentService
@@ -42,12 +41,17 @@ from app.torrent.config import (
 from app.torrent.policy import QueueDownloadPolicyService
 from app.torrent.validators import ValidationError, validate_magnet_url, validate_torrent_file_bytes
 
-router = Router(name="phase3_handlers")
+router = Router()
 logger = logging.getLogger(__name__)
 auth_service = AuthService(
     owner_user_id=get_owner_user_id(),
     db_path=get_auth_db_path(),
 )
+
+# Telethon takes parse mode per call; keep HTML everywhere except the one Markdown
+# site (the click-to-copy /authenticate token).
+_HTML = "html"
+_MARKDOWN = "md"
 
 
 class _QueueDownloadSessionState:
@@ -103,11 +107,11 @@ def _format_size_gb(path: Path) -> str:
 
 class _CompletionNotifier:
     def __init__(self) -> None:
-        self._bot: Bot | None = None
+        self._client: TelegramClient | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def bind_runtime(self, bot: Bot) -> None:
-        self._bot = bot
+    def bind_runtime(self, client: TelegramClient) -> None:
+        self._client = client
         self._loop = asyncio.get_running_loop()
 
     def on_torrent_completed(self, torrent: CompletedTorrent) -> None:
@@ -115,7 +119,7 @@ class _CompletionNotifier:
             logger.warning("Cannot notify torrent completion without user_id hash=%s", torrent.hash)
             return
 
-        if self._bot is None or self._loop is None:
+        if self._client is None or self._loop is None:
             logger.warning("Bot runtime is not bound yet; skipping completion notification hash=%s", torrent.hash)
             return
 
@@ -137,7 +141,7 @@ class _CompletionNotifier:
             logger.warning("Cannot notify torrent failure without user_id hash=%s", torrent.hash)
             return
 
-        if self._bot is None or self._loop is None:
+        if self._client is None or self._loop is None:
             logger.warning("Bot runtime is not bound yet; skipping failure notification hash=%s", torrent.hash)
             return
 
@@ -155,7 +159,7 @@ class _CompletionNotifier:
         future.add_done_callback(_handle_result)
 
     async def _send_download_completion_message(self, torrent: CompletedTorrent) -> None:
-        assert self._bot is not None
+        assert self._client is not None
         assert torrent.user_id is not None
 
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
@@ -212,29 +216,25 @@ class _CompletionNotifier:
                 f"<pre>{escape(wget_script)}</pre>"
             )
 
-        await self._bot.send_message(
-            chat_id=torrent.user_id,
-            text=text,
-            parse_mode="HTML",
-        )
-
+        await self._client.send_message(torrent.user_id, text, parse_mode=_HTML)
 
     async def _send_download_failure_message(self, torrent: FailedTorrent) -> None:
-        assert self._bot is not None
+        assert self._client is not None
         assert torrent.user_id is not None
 
         torrent_name = escape(_get_user_display_torrent_name(torrent.name))
         error_state = escape(torrent.state or "unknown")
-        await self._bot.send_message(
-            chat_id=torrent.user_id,
-            text=(
+        await self._client.send_message(
+            torrent.user_id,
+            (
                 "❌ Download failed: "
                 f"<b>{torrent_name}</b>\n"
                 f"State: <code>{error_state}</code>\n"
                 "The torrent was removed from the queue and any partially downloaded files were deleted."
             ),
-            parse_mode="HTML",
+            parse_mode=_HTML,
         )
+
 
 completion_notifier = _CompletionNotifier()
 
@@ -270,7 +270,8 @@ def _delete_user_download_folders(user_id: int) -> tuple[list[Path], list[Path]]
 def _with_cancel_hint(text: str) -> str:
     return f"{text} You can run /cancel to cancel the current command."
 
-def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
+
+def _build_cancel_download_keyboard(user_id: int) -> list[list[Button]] | None:
     if torrent_service is None:
         return None
 
@@ -278,19 +279,18 @@ def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None
     if not active_torrents:
         return None
 
-    rows = [
+    return [
         [
-            InlineKeyboardButton(
-                text=_get_user_display_torrent_name(torrent.name),
-                callback_data=f"cancel_torrent:{torrent.hash}",
+            Button.inline(
+                _get_user_display_torrent_name(torrent.name),
+                data=f"cancel_torrent:{torrent.hash}".encode(),
             )
         ]
         for torrent in active_torrents
     ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> InlineKeyboardMarkup | None:
+def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> list[list[Button]] | None:
     user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
     if not user_finished_root.exists() or not user_finished_root.is_dir():
         return None
@@ -299,21 +299,21 @@ def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> In
     if not entries:
         return None
 
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[Button]] = []
     for index, entry in enumerate(entries):
         rows.append(
             [
-                InlineKeyboardButton(
-                    text=f"{_get_user_display_torrent_name(entry.name)} ({_format_size_gb(entry)})",
-                    callback_data=f"{callback_prefix}:{index}",
+                Button.inline(
+                    f"{_get_user_display_torrent_name(entry.name)} ({_format_size_gb(entry)})",
+                    data=f"{callback_prefix}:{index}".encode(),
                 )
             ]
         )
 
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return rows
 
 
-def _build_finished_users_keyboard(callback_prefix: str) -> InlineKeyboardMarkup | None:
+def _build_finished_users_keyboard(callback_prefix: str) -> list[list[Button]] | None:
     finished_root = get_finished_downloads_root().resolve()
     if not finished_root.exists() or not finished_root.is_dir():
         return None
@@ -322,19 +322,19 @@ def _build_finished_users_keyboard(callback_prefix: str) -> InlineKeyboardMarkup
     if not user_dirs:
         return None
 
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[Button]] = []
     for user_dir in user_dirs:
         user_id = user_dir.name
         rows.append(
             [
-                InlineKeyboardButton(
-                    text=f"User {user_id}",
-                    callback_data=f"{callback_prefix}:{user_id}",
+                Button.inline(
+                    f"User {user_id}",
+                    data=f"{callback_prefix}:{user_id}".encode(),
                 )
             ]
         )
 
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return rows
 
 
 def _delete_finished_download(user_id: int, selected_index: int) -> str:
@@ -438,102 +438,113 @@ download_link_service = _build_download_link_service()
 torrent_service = _build_torrent_service()
 
 
-def bind_runtime_bot(bot: Bot) -> None:
-    """Bind active bot/loop so background workers can send Telegram notifications."""
-    completion_notifier.bind_runtime(bot)
+def bind_runtime_client(client: TelegramClient) -> None:
+    """Bind active client/loop so background workers can send Telegram notifications."""
+    completion_notifier.bind_runtime(client)
 
 
-def _get_actor(message: Message) -> tuple[int, str | None] | None:
-    actor = message.from_user
-    if actor is None:
+def install_handlers(client: TelegramClient) -> None:
+    """Attach the router's message/callback dispatchers to the client."""
+    router.install(client)
+
+
+async def _get_actor(event) -> tuple[int, str | None] | None:
+    user_id = event.sender_id
+    if user_id is None:
         return None
-    return actor.id, actor.username
+    username: str | None = None
+    try:
+        sender = await event.get_sender()
+        username = getattr(sender, "username", None) if sender else None
+    except Exception:
+        logger.debug("Failed to resolve sender username for user_id=%s", user_id)
+    return user_id, username
 
 
-async def _require_admin(message: Message) -> tuple[int, str | None] | None:
-    actor = _get_actor(message)
+async def _require_admin(event) -> tuple[int, str | None] | None:
+    actor = await _get_actor(event)
     if actor is None:
-        await message.answer("Cannot resolve caller identity.")
+        await event.respond("Cannot resolve caller identity.")
         return None
 
     user_id, _ = actor
     if not auth_service.is_admin(user_id=user_id):
-        await message.answer("This command is admin-only.")
+        await event.respond("This command is admin-only.")
         return None
     return actor
 
 
-async def _require_whitelisted(message: Message) -> tuple[int, str | None] | None:
-    actor = _get_actor(message)
+async def _require_whitelisted(event) -> tuple[int, str | None] | None:
+    actor = await _get_actor(event)
     if actor is None:
-        await message.answer("Cannot resolve caller identity.")
+        await event.respond("Cannot resolve caller identity.")
         return None
 
     user_id, _ = actor
     if not auth_service.is_whitelisted(user_id):
-        await message.answer("You are not authenticated. Use /authenticate <token>.")
+        await event.respond("You are not authenticated. Use /authenticate <token>.")
         return None
     return actor
 
 
-@router.message(Command("start"))
-async def handle_start(message: Message) -> None:
-    actor = _get_actor(message)
+@router.command("start")
+async def handle_start(event: events.NewMessage.Event) -> None:
+    actor = await _get_actor(event)
     if actor is None:
-        await message.answer("Cannot resolve caller identity.")
+        await event.respond("Cannot resolve caller identity.")
         return
 
     user_id, _ = actor
     if not auth_service.is_whitelisted(user_id):
-        await message.answer(
+        await event.respond(
             "You are not whitelisted yet. Request an access token from the admin and "
             "use /authenticate <token> to get whitelisted before using the bot."
         )
         return
 
-    await message.answer("Welcome! Use /queuedownload to submit a torrent or magnet link.")
+    await event.respond("Welcome! Use /queuedownload to submit a torrent or magnet link.")
 
 
-@router.message(Command("queuedownload"))
-async def handle_queuedownload(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("queuedownload")
+async def handle_queuedownload(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
     user_id, _ = actor
     if not queue_download_policy.enforce_rate_limit(user_id):
-        await message.answer("Too many queue requests right now. Please wait a minute and try again.")
+        await event.respond("Too many queue requests right now. Please wait a minute and try again.")
         return
 
     queue_download_session_state.begin_waiting(user_id=user_id, command="queuedownload")
-    await message.answer("Paste a magnet URL or upload a .torrent file.")
+    await event.respond("Paste a magnet URL or upload a .torrent file.")
 
 
-@router.message(Command("cancel"))
-async def handle_cancel(message: Message) -> None:
-    actor = _get_actor(message)
+@router.command("cancel")
+async def handle_cancel(event: events.NewMessage.Event) -> None:
+    actor = await _get_actor(event)
     if actor is None:
-        await message.answer("Cannot resolve caller identity.")
+        await event.respond("Cannot resolve caller identity.")
         return
 
     user_id, _ = actor
     waiting_command = queue_download_session_state.get_waiting_command(user_id)
     if waiting_command is None:
-        await message.answer("There is no pending command input to cancel.")
+        await event.respond("There is no pending command input to cancel.")
         return
 
     queue_download_session_state.clear_waiting(user_id)
-    await message.answer(f"Cancelled /{waiting_command} input.")
+    await event.respond(f"Cancelled /{waiting_command} input.")
 
 
-@router.message(Command("canceldownload"))
-async def handle_cancel_download(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("canceldownload")
+async def handle_cancel_download(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
     if torrent_service is None:
-        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        await event.respond("Torrent service is currently unavailable. Please contact admin.")
         return
 
     user_id, _ = actor
@@ -543,84 +554,84 @@ async def handle_cancel_download(message: Message) -> None:
             timeout=get_qbit_api_timeout_seconds(),
         )
     except TimeoutError:
-        await message.answer(_map_qbit_user_message("qbit_timeout"))
+        await event.respond(_map_qbit_user_message("qbit_timeout"))
         return
     except Exception as exc:
         reason = _map_qbit_error(exc)
-        await message.answer(_map_qbit_user_message(reason))
+        await event.respond(_map_qbit_user_message(reason))
         return
 
     if keyboard is None:
-        await message.answer("You have no active downloads to cancel.")
+        await event.respond("You have no active downloads to cancel.")
         return
 
-    await message.answer("Select a download to cancel and delete:", reply_markup=keyboard)
+    await event.respond("Select a download to cancel and delete:", buttons=keyboard)
 
 
-@router.callback_query(F.data.startswith("cancel_torrent:"))
-async def handle_cancel_torrent_click(callback_query: CallbackQuery) -> None:
-    message = callback_query.message
-    actor = callback_query.from_user
-    if message is None or actor is None:
-        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+@router.callback("cancel_torrent:")
+async def handle_cancel_torrent_click(event: events.CallbackQuery.Event) -> None:
+    actor = await _get_actor(event)
+    if actor is None:
+        await event.answer("Cannot resolve caller identity.", alert=True)
         return
 
-    if not auth_service.is_whitelisted(actor.id):
-        await callback_query.answer("You are not authenticated.", show_alert=True)
+    user_id, _ = actor
+    if not auth_service.is_whitelisted(user_id):
+        await event.answer("You are not authenticated.", alert=True)
         return
 
     if torrent_service is None:
-        await callback_query.answer("Torrent service unavailable.", show_alert=True)
+        await event.answer("Torrent service unavailable.", alert=True)
         return
 
-    callback_data = callback_query.data or ""
+    callback_data = (event.data or b"").decode()
     torrent_hash = callback_data.partition(":")[2].strip()
     if not torrent_hash:
-        await callback_query.answer("Invalid torrent selection.", show_alert=True)
+        await event.answer("Invalid torrent selection.", alert=True)
         return
 
     try:
         cancelled = await asyncio.wait_for(
-            asyncio.to_thread(torrent_service.cancel_user_torrent, actor.id, torrent_hash),
+            asyncio.to_thread(torrent_service.cancel_user_torrent, user_id, torrent_hash),
             timeout=get_qbit_api_timeout_seconds(),
         )
     except TimeoutError:
-        await callback_query.answer(_map_qbit_user_message("qbit_timeout"), show_alert=True)
+        await event.answer(_map_qbit_user_message("qbit_timeout"), alert=True)
         return
     except Exception as exc:
         reason = _map_qbit_error(exc)
-        await callback_query.answer(_map_qbit_user_message(reason), show_alert=True)
+        await event.answer(_map_qbit_user_message(reason), alert=True)
         return
 
     if not cancelled:
-        await callback_query.answer("Download is no longer active.", show_alert=True)
+        await event.answer("Download is no longer active.", alert=True)
         return
 
-    await callback_query.answer("Download cancelled.")
+    await event.answer("Download cancelled.")
 
     try:
         keyboard = await asyncio.wait_for(
-            asyncio.to_thread(_build_cancel_download_keyboard, actor.id),
+            asyncio.to_thread(_build_cancel_download_keyboard, user_id),
             timeout=get_qbit_api_timeout_seconds(),
         )
     except Exception:
         keyboard = None
 
     if keyboard is None:
-        await message.edit_text("No active downloads left to cancel.")
+        await event.edit("No active downloads left to cancel.")
         return
 
-    await message.edit_text("Select a download to cancel and delete:", reply_markup=keyboard)
+    await event.edit("Select a download to cancel and delete:", buttons=keyboard)
 
 
-@router.message(Command("status"))
-async def handle_status(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("status")
+async def handle_status(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
     if torrent_service is None:
-        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        await event.respond("Torrent service is currently unavailable. Please contact admin.")
         return
 
     user_id, _ = actor
@@ -633,15 +644,15 @@ async def handle_status(message: Message) -> None:
             timeout=get_qbit_api_timeout_seconds(),
         )
     except TimeoutError:
-        await message.answer(_map_qbit_user_message("qbit_timeout"))
+        await event.respond(_map_qbit_user_message("qbit_timeout"))
         return
     except Exception as exc:
         reason = _map_qbit_error(exc)
-        await message.answer(_map_qbit_user_message(reason))
+        await event.respond(_map_qbit_user_message(reason))
         return
 
     if not queued_torrents:
-        await message.answer("You have no active queued torrents.")
+        await event.respond("You have no active queued torrents.")
         return
 
     lines = ["Your active torrents:"]
@@ -656,17 +667,17 @@ async def handle_status(message: Message) -> None:
             f"{speed_suffix}"
         )
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    await event.respond("\n".join(lines), parse_mode=_HTML)
 
 
-@router.message(Command("myfolder"))
-async def handle_myfolder(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("myfolder")
+async def handle_myfolder(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
     if download_link_service is None or not download_link_service.is_configured():
-        await message.answer(
+        await event.respond(
             "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
             "and DOWNLOAD_LINK_SECRET."
         )
@@ -674,16 +685,16 @@ async def handle_myfolder(message: Message) -> None:
 
     user_id, _ = actor
     folder_link = download_link_service.build_user_folder_link(user_id=user_id)
-    await message.answer(
+    await event.respond(
         f"Your personal download folder link (valid for {get_download_link_ttl_hours()} hours):\n"
         f"{folder_link}\n\n"
         "This link is scoped to your Telegram user folder only."
     )
 
 
-@router.message(Command("deletefiles"))
-async def handle_deletefiles(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("deletefiles")
+async def handle_deletefiles(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
@@ -691,70 +702,72 @@ async def handle_deletefiles(message: Message) -> None:
     if auth_service.is_admin(user_id=user_id):
         keyboard = await asyncio.to_thread(_build_finished_users_keyboard, "delete_user_files")
         if keyboard is None:
-            await message.answer("No user folders with finished downloads found.")
+            await event.respond("No user folders with finished downloads found.")
             return
 
-        await message.answer("Select a user folder to manage files:", reply_markup=keyboard)
+        await event.respond("Select a user folder to manage files:", buttons=keyboard)
         return
 
     try:
         keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "delete_file")
     except ValueError:
-        await message.answer("Failed to resolve your finished downloads folder.")
+        await event.respond("Failed to resolve your finished downloads folder.")
         return
 
     if keyboard is None:
-        await message.answer("No finished downloads found in your folder yet.")
+        await event.respond("No finished downloads found in your folder yet.")
         return
 
-    await message.answer("Select a finished download to delete:", reply_markup=keyboard)
+    await event.respond("Select a finished download to delete:", buttons=keyboard)
 
 
-@router.callback_query(F.data.startswith("delete_user_files:"))
-async def handle_delete_user_files_click(callback_query: CallbackQuery) -> None:
-    message = callback_query.message
-    actor = callback_query.from_user
-    if message is None or actor is None:
-        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+@router.callback("delete_user_files:")
+async def handle_delete_user_files_click(event: events.CallbackQuery.Event) -> None:
+    actor = await _get_actor(event)
+    if actor is None:
+        await event.answer("Cannot resolve caller identity.", alert=True)
         return
 
-    if not auth_service.is_admin(user_id=actor.id):
-        await callback_query.answer("This action is admin-only.", show_alert=True)
+    user_id, _ = actor
+    if not auth_service.is_admin(user_id=user_id):
+        await event.answer("This action is admin-only.", alert=True)
         return
 
-    callback_data = callback_query.data or ""
+    callback_data = (event.data or b"").decode()
     selected_user_token = callback_data.partition(":")[2].strip()
     if not selected_user_token:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
         selected_user_id = _parse_user_id(selected_user_token)
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
-        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, selected_user_id, f"delete_admin_file:{selected_user_id}")
+        keyboard = await asyncio.to_thread(
+            _build_finished_downloads_keyboard, selected_user_id, f"delete_admin_file:{selected_user_id}"
+        )
     except ValueError:
-        await callback_query.answer("Failed to resolve selected user folder.", show_alert=True)
+        await event.answer("Failed to resolve selected user folder.", alert=True)
         return
 
     if keyboard is None:
-        await callback_query.answer("This user has no finished downloads.", show_alert=True)
+        await event.answer("This user has no finished downloads.", alert=True)
         return
 
-    await callback_query.answer()
-    await message.edit_text(
+    await event.answer()
+    await event.edit(
         f"Selected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+        buttons=keyboard,
+        parse_mode=_HTML,
     )
 
 
-@router.message(Command("getdownloadlink"))
-async def handle_getdownloadlink(message: Message) -> None:
-    actor = await _require_whitelisted(message)
+@router.command("getdownloadlink")
+async def handle_getdownloadlink(event: events.NewMessage.Event) -> None:
+    actor = await _require_whitelisted(event)
     if actor is None:
         return
 
@@ -762,131 +775,134 @@ async def handle_getdownloadlink(message: Message) -> None:
     try:
         keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "download_link")
     except ValueError:
-        await message.answer("Failed to resolve your finished downloads folder.")
+        await event.respond("Failed to resolve your finished downloads folder.")
         return
 
     if keyboard is None:
-        await message.answer("No finished downloads found in your folder yet.")
+        await event.respond("No finished downloads found in your folder yet.")
         return
 
-    await message.answer(f"Select a finished download to get its direct link (valid for {get_download_link_ttl_hours()} hours):", reply_markup=keyboard)
+    await event.respond(
+        f"Select a finished download to get its direct link (valid for {get_download_link_ttl_hours()} hours):",
+        buttons=keyboard,
+    )
 
 
-@router.callback_query(F.data.startswith("download_link:"))
-async def handle_download_link_click(callback_query: CallbackQuery) -> None:
-    message = callback_query.message
-    actor = callback_query.from_user
-    if message is None or actor is None:
-        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+@router.callback("download_link:")
+async def handle_download_link_click(event: events.CallbackQuery.Event) -> None:
+    actor = await _get_actor(event)
+    if actor is None:
+        await event.answer("Cannot resolve caller identity.", alert=True)
         return
 
-    if not auth_service.is_whitelisted(actor.id):
-        await callback_query.answer("You are not authenticated.", show_alert=True)
+    user_id, _ = actor
+    if not auth_service.is_whitelisted(user_id):
+        await event.answer("You are not authenticated.", alert=True)
         return
 
-    callback_data = callback_query.data or ""
+    callback_data = (event.data or b"").decode()
     selection_token = callback_data.partition(":")[2].strip()
     if not selection_token:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
         selected_index = int(selection_token)
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
-    await callback_query.answer()
+    await event.answer()
 
     try:
-        reply_text = await asyncio.to_thread(_build_finished_download_reply, actor.id, selected_index)
+        reply_text = await asyncio.to_thread(_build_finished_download_reply, user_id, selected_index)
     except FileNotFoundError:
-        await message.answer("That download no longer exists. Run /getdownloadlink again.")
+        await event.respond("That download no longer exists. Run /getdownloadlink again.")
         return
     except ValueError as exc:
         if str(exc) == "download_links_not_configured":
-            await message.answer(
+            await event.respond(
                 "Folder links are not configured yet. Please ask admin to configure HFS_BASE_URL "
                 "and DOWNLOAD_LINK_SECRET."
             )
             return
 
-        await message.answer("Invalid selection. Run /getdownloadlink again.")
+        await event.respond("Invalid selection. Run /getdownloadlink again.")
         return
 
-    await message.answer(reply_text, parse_mode="HTML")
+    await event.respond(reply_text, parse_mode=_HTML)
 
 
-@router.callback_query(F.data.startswith("delete_file:"))
-async def handle_delete_file_click(callback_query: CallbackQuery) -> None:
-    message = callback_query.message
-    actor = callback_query.from_user
-    if message is None or actor is None:
-        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+@router.callback("delete_file:")
+async def handle_delete_file_click(event: events.CallbackQuery.Event) -> None:
+    actor = await _get_actor(event)
+    if actor is None:
+        await event.answer("Cannot resolve caller identity.", alert=True)
         return
 
-    if not auth_service.is_whitelisted(actor.id):
-        await callback_query.answer("You are not authenticated.", show_alert=True)
+    user_id, _ = actor
+    if not auth_service.is_whitelisted(user_id):
+        await event.answer("You are not authenticated.", alert=True)
         return
 
-    callback_data = callback_query.data or ""
+    callback_data = (event.data or b"").decode()
     selection_token = callback_data.partition(":")[2].strip()
     if not selection_token:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
         selected_index = int(selection_token)
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
-        deleted_text = await asyncio.to_thread(_delete_finished_download, actor.id, selected_index)
+        deleted_text = await asyncio.to_thread(_delete_finished_download, user_id, selected_index)
     except FileNotFoundError:
-        await callback_query.answer("That download no longer exists.", show_alert=True)
+        await event.answer("That download no longer exists.", alert=True)
         return
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
     except OSError:
-        await callback_query.answer("Failed to delete selected download.", show_alert=True)
+        await event.answer("Failed to delete selected download.", alert=True)
         return
 
-    await callback_query.answer("Deleted.")
+    await event.answer("Deleted.")
 
     try:
-        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, actor.id, "delete_file")
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, user_id, "delete_file")
     except ValueError:
         keyboard = None
 
     if keyboard is None:
-        await message.edit_text(f"{deleted_text}\n\nNo finished downloads left.", parse_mode="HTML")
+        await event.edit(f"{deleted_text}\n\nNo finished downloads left.", parse_mode=_HTML)
         return
 
-    await message.edit_text(
+    await event.edit(
         f"{deleted_text}\n\nSelect a finished download to delete:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+        buttons=keyboard,
+        parse_mode=_HTML,
     )
 
 
-@router.callback_query(F.data.startswith("delete_admin_file:"))
-async def handle_delete_admin_file_click(callback_query: CallbackQuery) -> None:
-    message = callback_query.message
-    actor = callback_query.from_user
-    if message is None or actor is None:
-        await callback_query.answer("Cannot resolve caller identity.", show_alert=True)
+@router.callback("delete_admin_file:")
+async def handle_delete_admin_file_click(event: events.CallbackQuery.Event) -> None:
+    actor = await _get_actor(event)
+    if actor is None:
+        await event.answer("Cannot resolve caller identity.", alert=True)
         return
 
-    if not auth_service.is_admin(user_id=actor.id):
-        await callback_query.answer("This action is admin-only.", show_alert=True)
+    user_id, _ = actor
+    if not auth_service.is_admin(user_id=user_id):
+        await event.answer("This action is admin-only.", alert=True)
         return
 
-    callback_data = callback_query.data or ""
+    callback_data = (event.data or b"").decode()
     parts = callback_data.split(":", maxsplit=2)
     if len(parts) != 3:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     _, selected_user_token, selection_token = parts
@@ -895,22 +911,22 @@ async def handle_delete_admin_file_click(callback_query: CallbackQuery) -> None:
         selected_user_id = _parse_user_id(selected_user_token)
         selected_index = int(selection_token)
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
 
     try:
         deleted_text = await asyncio.to_thread(_delete_finished_download, selected_user_id, selected_index)
     except FileNotFoundError:
-        await callback_query.answer("That download no longer exists.", show_alert=True)
+        await event.answer("That download no longer exists.", alert=True)
         return
     except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
+        await event.answer("Invalid selection.", alert=True)
         return
     except OSError:
-        await callback_query.answer("Failed to delete selected download.", show_alert=True)
+        await event.answer("Failed to delete selected download.", alert=True)
         return
 
-    await callback_query.answer("Deleted.")
+    await event.answer("Deleted.")
 
     try:
         keyboard = await asyncio.to_thread(
@@ -922,122 +938,122 @@ async def handle_delete_admin_file_click(callback_query: CallbackQuery) -> None:
         keyboard = None
 
     if keyboard is None:
-        await message.edit_text(
+        await event.edit(
             f"{deleted_text}\n\nNo finished downloads left for user <code>{selected_user_id}</code>.",
-            parse_mode="HTML",
+            parse_mode=_HTML,
         )
         return
 
-    await message.edit_text(
+    await event.edit(
         f"{deleted_text}\n\nSelected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+        buttons=keyboard,
+        parse_mode=_HTML,
     )
 
 
-@router.message(Command("generateaccesstoken"))
-async def handle_generate_access_token(message: Message) -> None:
-    if await _require_admin(message) is None:
+@router.command("generateaccesstoken")
+async def handle_generate_access_token(event: events.NewMessage.Event) -> None:
+    if await _require_admin(event) is None:
         return
 
     token = auth_service.generate_access_token()
-    await message.answer(
+    await event.respond(
         "Here is your access token command. Click the code below to copy it, "
         "then paste and send it to the bot.\n"
         "Valid for 30 minutes and single-use:\n"
         f"`/authenticate {token}`",
-        parse_mode="Markdown",
+        parse_mode=_MARKDOWN,
     )
 
 
-@router.message(Command("authenticate"))
-async def handle_authenticate(message: Message, command: CommandObject) -> None:
-    actor = _get_actor(message)
+@router.command("authenticate")
+async def handle_authenticate(event: events.NewMessage.Event) -> None:
+    actor = await _get_actor(event)
     if actor is None:
-        await message.answer("Cannot resolve caller identity.")
+        await event.respond("Cannot resolve caller identity.")
         return
 
     user_id, username = actor
     if auth_service.is_whitelisted(user_id):
-        await message.answer("You are already whitelisted. Auth token was not consumed.")
+        await event.respond("You are already whitelisted. Auth token was not consumed.")
         return
 
-    token = (command.args or "").strip()
+    token = command_args(event.raw_text)
     if not token:
-        await message.answer("Usage: /authenticate <token>")
+        await event.respond("Usage: /authenticate <token>")
         return
 
     if auth_service.authenticate_user(token=token, user_id=user_id, username=username):
-        await message.answer("Authentication successful. You are now whitelisted.")
+        await event.respond("Authentication successful. You are now whitelisted.")
         await setup_whitelisted_commands(
-            bot=message.bot,
+            client=event.client,
             user_id=user_id,
             is_admin=auth_service.is_admin(user_id=user_id),
         )
         owner_user_id = get_owner_user_id()
         if owner_user_id is not None:
             username_display = f"@{username}" if username else "<none>"
-            await message.bot.send_message(
-                chat_id=owner_user_id,
-                text=(
+            await event.client.send_message(
+                owner_user_id,
+                (
                     "User authenticated successfully:\n"
                     f"- user_id: <code>{user_id}</code>\n"
                     f"- username: {escape(username_display)}"
                 ),
-                parse_mode="HTML",
+                parse_mode=_HTML,
             )
         return
 
-    await message.answer("Invalid or expired token.")
+    await event.respond("Invalid or expired token.")
 
 
-@router.message(Command("removeuser"))
-async def handle_removeuser(message: Message, command: CommandObject) -> None:
-    if await _require_admin(message) is None:
+@router.command("removeuser")
+async def handle_removeuser(event: events.NewMessage.Event) -> None:
+    if await _require_admin(event) is None:
         return
 
-    raw_user_id = (command.args or "").strip()
+    raw_user_id = command_args(event.raw_text)
     if not raw_user_id:
-        await message.answer("Usage: /removeuser <user_id>")
+        await event.respond("Usage: /removeuser <user_id>")
         return
 
     try:
         target_user_id = int(raw_user_id)
     except ValueError:
-        await message.answer("user_id must be an integer.")
+        await event.respond("user_id must be an integer.")
         return
 
     if auth_service.remove_user(target_user_id):
-        await setup_non_whitelisted_commands(bot=message.bot, user_id=target_user_id)
+        await setup_non_whitelisted_commands(client=event.client, user_id=target_user_id)
         _, failed_paths = _delete_user_download_folders(target_user_id)
         if failed_paths:
             failed_paths_display = "\n".join(f"- <code>{escape(str(path))}</code>" for path in failed_paths)
-            await message.answer(
+            await event.respond(
                 (
                     f"Removed user {target_user_id} from whitelist.\n"
                     "However, some user folders could not be deleted:\n"
                     f"{failed_paths_display}"
                 ),
-                parse_mode="HTML",
+                parse_mode=_HTML,
             )
             return
 
-        await message.answer(
+        await event.respond(
             f"Removed user {target_user_id} from whitelist and deleted their download folders."
         )
         return
 
-    await message.answer(f"User {target_user_id} is not whitelisted.")
+    await event.respond(f"User {target_user_id} is not whitelisted.")
 
 
-@router.message(Command("whitelist"))
-async def handle_whitelist(message: Message) -> None:
-    if await _require_admin(message) is None:
+@router.command("whitelist")
+async def handle_whitelist(event: events.NewMessage.Event) -> None:
+    if await _require_admin(event) is None:
         return
 
     users = auth_service.list_whitelisted_users()
     if not users:
-        await message.answer("Whitelist is empty.")
+        await event.respond("Whitelist is empty.")
         return
 
     lines = ["Whitelisted users:"]
@@ -1049,22 +1065,22 @@ async def handle_whitelist(message: Message) -> None:
             f"username_at_authentication={escape(username_display)}"
         )
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    await event.respond("\n".join(lines), parse_mode=_HTML)
 
 
-@router.message(Command("availablespace"))
-async def handle_availablespace(message: Message) -> None:
-    if await _require_admin(message) is None:
+@router.command("availablespace")
+async def handle_availablespace(event: events.NewMessage.Event) -> None:
+    if await _require_admin(event) is None:
         return
 
     usage = shutil.disk_usage(get_finished_downloads_root())
     available_gb = usage.free / (1024 ** 3)
-    await message.answer(f"Available disk space: {available_gb:.2f} GB")
+    await event.respond(f"Available disk space: {available_gb:.2f} GB")
 
 
-@router.message()
-async def handle_queue_download_input(message: Message) -> None:
-    actor = _get_actor(message)
+@router.fallback()
+async def handle_queue_download_input(event: events.NewMessage.Event) -> None:
+    actor = await _get_actor(event)
     if actor is None:
         return
 
@@ -1074,39 +1090,40 @@ async def handle_queue_download_input(message: Message) -> None:
 
     if not auth_service.is_whitelisted(user_id):
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("You are not authenticated. Use /authenticate <token>.")
+        await event.respond("You are not authenticated. Use /authenticate <token>.")
         return
 
     if torrent_service is None:
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Torrent service is currently unavailable. Please contact admin.")
+        await event.respond("Torrent service is currently unavailable. Please contact admin.")
         return
 
-    if message.document is not None:
-        await _process_queue_download_torrent_upload(message=message, user_id=user_id)
+    if event.document is not None:
+        await _process_queue_download_torrent_upload(event=event, user_id=user_id)
         return
 
-    text = (message.text or "").strip()
+    text = (event.raw_text or "").strip()
     if text:
-        await _process_queue_download_magnet_input(message=message, user_id=user_id, text=text)
+        await _process_queue_download_magnet_input(event=event, user_id=user_id, text=text)
         return
 
-    await message.answer(_with_cancel_hint("Please paste a magnet URL or upload a .torrent file."))
+    await event.respond(_with_cancel_hint("Please paste a magnet URL or upload a .torrent file."))
 
 
-async def _process_queue_download_torrent_upload(message: Message, user_id: int) -> None:
-    assert message.document is not None
-    document = message.document
-    original_name = document.file_name or "upload.torrent"
+async def _process_queue_download_torrent_upload(event: events.NewMessage.Event, user_id: int) -> None:
+    assert event.document is not None
+    uploaded_file = event.file
+    original_name = (uploaded_file.name if uploaded_file else None) or "upload.torrent"
+    file_size = uploaded_file.size if uploaded_file else None
     if not original_name.lower().endswith(".torrent"):
-        await message.answer(_with_cancel_hint("Please upload a .torrent file."))
+        await event.respond(_with_cancel_hint("Please upload a .torrent file."))
         queue_download_policy.mark_rejection("torrent_extension")
         return
 
-    if document.file_size is not None and document.file_size > get_max_torrent_bytes_hard():
-        await message.answer(_with_cancel_hint("Torrent file is too large."))
+    if file_size is not None and file_size > get_max_torrent_bytes_hard():
+        await event.respond(_with_cancel_hint("Torrent file is too large."))
         queue_download_policy.mark_rejection("torrent_size_hard")
-        logger.info("/queuedownload rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", document.file_size)
+        logger.info("/queuedownload rejected upload user_id=%s reason=%s size=%s", user_id, "torrent_size_hard", file_size)
         return
 
     temp_input_dir = get_torrent_input_tmp_dir()
@@ -1115,13 +1132,12 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
     infohash: str | None = None
     reason = "accepted"
     try:
-        tg_file = await message.bot.get_file(document.file_id)
-        await message.bot.download_file(tg_file.file_path, destination=temp_path)
+        await event.message.download_media(file=str(temp_path))
         torrent_bytes = temp_path.read_bytes()
 
         if len(torrent_bytes) > get_max_torrent_bytes_hard():
             queue_download_policy.mark_rejection("torrent_size_hard")
-            await message.answer(_with_cancel_hint("Torrent file is too large."))
+            await event.respond(_with_cancel_hint("Torrent file is too large."))
             reason = "torrent_size_hard"
             return
 
@@ -1146,7 +1162,7 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
             reason = "duplicate"
             queue_download_policy.mark_rejection("duplicate")
             queue_download_session_state.clear_waiting(user_id)
-            await message.answer("This torrent is already queued.")
+            await event.respond("This torrent is already queued.")
             return
 
         started_at = time.monotonic()
@@ -1161,31 +1177,31 @@ async def _process_queue_download_torrent_upload(message: Message, user_id: int)
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
+        await event.respond("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
-        await message.answer(_with_cancel_hint(exc.user_message))
+        await event.respond(_with_cancel_hint(exc.user_message))
     except TimeoutError:
         reason = "qbit_timeout"
         queue_download_policy.mark_qbit_error()
-        await message.answer("Torrent service timed out while queueing this torrent. Please retry.")
+        await event.respond("Torrent service timed out while queueing this torrent. Please retry.")
     except Exception as exc:
         reason = _map_qbit_error(exc)
         queue_download_policy.mark_qbit_error()
-        await message.answer(_map_qbit_user_message(reason))
+        await event.respond(_map_qbit_user_message(reason))
     finally:
         logger.info(
             "/queuedownload torrent upload decision user_id=%s size=%s infohash=%s reason=%s",
             user_id,
-            document.file_size,
+            file_size,
             infohash,
             reason,
         )
         temp_path.unlink(missing_ok=True)
 
 
-async def _process_queue_download_magnet_input(message: Message, user_id: int, text: str) -> None:
+async def _process_queue_download_magnet_input(event: events.NewMessage.Event, user_id: int, text: str) -> None:
     infohash: str | None = None
     reason = "accepted"
     try:
@@ -1200,7 +1216,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
 
         if torrent_service is None:
             reason = "service_unavailable"
-            await message.answer("Torrent service is currently unavailable. Please contact admin.")
+            await event.respond("Torrent service is currently unavailable. Please contact admin.")
             return
 
         is_duplicate = await asyncio.wait_for(
@@ -1211,7 +1227,7 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
             reason = "duplicate"
             queue_download_policy.mark_rejection("duplicate")
             queue_download_session_state.clear_waiting(user_id)
-            await message.answer("This torrent is already queued.")
+            await event.respond("This torrent is already queued.")
             return
 
         started_at = time.monotonic()
@@ -1226,19 +1242,19 @@ async def _process_queue_download_magnet_input(message: Message, user_id: int, t
         queue_download_policy.mark_qbit_latency(time.monotonic() - started_at)
         queue_download_policy.mark_accepted()
         queue_download_session_state.clear_waiting(user_id)
-        await message.answer("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
+        await event.respond("Download queued successfully. You'll receive a message once the download completes.\n\nUse /status to check progress. The bot checks completion every 30 seconds, so if /status is empty but you haven't received the completion message yet, please wait up to 30 seconds.")
     except ValidationError as exc:
         reason = exc.code
         queue_download_policy.mark_rejection(exc.code)
-        await message.answer(_with_cancel_hint(exc.user_message))
+        await event.respond(_with_cancel_hint(exc.user_message))
     except TimeoutError:
         reason = "qbit_timeout"
         queue_download_policy.mark_qbit_error()
-        await message.answer("Torrent service timed out while queueing this magnet. Please retry.")
+        await event.respond("Torrent service timed out while queueing this magnet. Please retry.")
     except Exception as exc:
         reason = _map_qbit_error(exc)
         queue_download_policy.mark_qbit_error()
-        await message.answer(_map_qbit_user_message(reason))
+        await event.respond(_map_qbit_user_message(reason))
     finally:
         logger.info(
             "/queuedownload magnet decision user_id=%s size=%s infohash=%s reason=%s",

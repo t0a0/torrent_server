@@ -8,6 +8,11 @@ venv/
 # Environment files
 .env
 
+# Telethon session files and proxy store (credentials / secrets)
+*.session
+*.session-journal
+proxies.json
+
 # Docker
 *.pid
 *.log

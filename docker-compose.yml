@@ -8,6 +8,11 @@ services:
     depends_on:
       - qbittorrent
       - file-server
+    ports:
+      # Proxy admin page, bound to localhost only. The host's reverse proxy (the one
+      # already serving the other subdomains) terminates HTTPS and forwards here; the
+      # port is never exposed as plaintext on the public IP.
+      - "127.0.0.1:${ADMIN_WEB_PORT:-8082}:${ADMIN_WEB_PORT:-8082}"
     volumes:
       - ./volumes/downloads:/downloads
       - ./volumes/auth:/auth
@@ -28,7 +33,9 @@ services:
       TZ: UTC
       WEBUI_PORT: 8080
     ports:
-      - "8080:8080"
+      # Web UI on localhost only; reached through the host's reverse proxy (HTTPS).
+      - "127.0.0.1:8080:8080"
+      # BitTorrent peer port stays public so peers can open incoming connections.
       - "6881:6881"
       - "6881:6881/udp"
     volumes:
@@ -44,18 +51,8 @@ services:
     env_file:
       - .env
     ports:
-      - "8081:8081"
+      # Localhost only; reached through the host's reverse proxy (HTTPS).
+      - "127.0.0.1:8081:8081"
     volumes:
       - ./volumes/downloads:/srv/downloads:ro
-    restart: unless-stopped
-
-  nginxproxymanager:
-    image: jc21/nginx-proxy-manager:latest
-    ports:
-      - "80:80"
-      - "81:81"
-      - "443:443"
-    volumes:
-      - ./volumes/nginxproxymanager/data:/data
-      - ./volumes/nginxproxymanager/letsencrypt:/etc/letsencrypt
     restart: unless-stopped

@@ -29,7 +29,7 @@ _OWNER_USER_ID_KEY = "BOT_OWNER_USER_ID"
 
 
 def _get_owner_user_id() -> int | None:
-    """Read BOT_OWNER_USER_ID without importing the aiogram-backed bot package."""
+    """Read BOT_OWNER_USER_ID without importing the Telethon-backed bot package."""
     load_env_file()
     raw_user_id = os.getenv(_OWNER_USER_ID_KEY)
     if not raw_user_id:

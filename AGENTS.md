@@ -5,7 +5,9 @@ This repository is for a **torrent server controlled by a Telegram bot**.
 
 Primary stack and constraints:
 - Python (latest stable version)
-- Telegram bot API via `aiogram`
+- Telegram via `telethon` (MTProto), so the bot can reach Telegram through an MTProto
+  proxy — including FakeTLS (`ee`) proxies — when Telegram is blocked at the network
+  edge. Requires `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` in addition to the bot token.
 - Torrent control via `python-qbittorrent`
 - Docker for build and deployment
 - SQLite for auth/whitelist persistence
@@ -54,7 +56,9 @@ When implementing features in this repository, prefer:
 - Clear separation of concerns (Telegram handlers, auth/whitelist service, torrent service, download-link service).
 - Configuration through environment variables (bot token, owner user_id, storage paths, qBittorrent connection, token TTL, etc.).
 - Docker-first setup for local and server execution.
-- Async-friendly design to align with `aiogram` and background task/event handling.
+- Async-friendly design to align with `telethon` and background task/event handling.
+  Note the bot runs a connect/serve loop that rotates through the proxy store on failure,
+  so the download workers keep running even while Telegram is unreachable.
 
 ## Security and access notes
 - Treat whitelist and owner checks as mandatory guardrails.
