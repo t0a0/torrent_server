@@ -64,7 +64,7 @@ Rename `.env.example` to `.env` and fill all values.
 |---|---:|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram Bot API token from BotFather. |
 | `BOT_OWNER_USER_ID` | Yes | Telegram `user_id` of the bot owner/admin (allowed to run admin-only commands). |
-| `TELEGRAM_PROXY` | No | Proxy URL for reaching Telegram when it is blocked (`socks5://`, `socks5h://`, `socks4://`, or `http://`; e.g. `socks5h://192.168.29.13:3128`). DNS is resolved at the proxy. Leave blank to connect directly. See [Reaching Telegram through a proxy](#reaching-telegram-through-a-proxy). |
+| `TELEGRAM_PROXY` | No | Proxy URL for reaching Telegram when it is blocked (`socks5://`, `socks5h://`, `socks4://`, or `http://`; e.g. `socks5h://<ip:port>`). DNS is resolved at the proxy. Leave blank to connect directly. See [Reaching Telegram through a proxy](#reaching-telegram-through-a-proxy). |
 | `QBITTORRENT_URL` | Yes | qBittorrent Web UI/API URL used by the bot (for Docker Compose default: `http://qbittorrent:8080`). |
 | `QBITTORRENT_USERNAME` | Yes | qBittorrent Web UI username used by the bot API client. |
 | `QBITTORRENT_PASSWORD` | Yes | qBittorrent Web UI password used by the bot API client. |
@@ -133,7 +133,7 @@ itself get out to Telegram. A SOCKS5 proxy is a generic TCP tunnel, so it carrie
 ordinary Bot API traffic and no code change is needed:
 
 ```
-TELEGRAM_PROXY=socks5h://192.168.29.13:3128
+TELEGRAM_PROXY=socks5h://<ip:port>
 ```
 
 - Supported schemes: `socks5://`, `socks5h://`, `socks4://`, `http://`. Add
