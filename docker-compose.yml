@@ -28,9 +28,7 @@ services:
       TZ: UTC
       WEBUI_PORT: 8080
     ports:
-      # Web UI on localhost only; reached through the host's reverse proxy (HTTPS).
-      - "127.0.0.1:8080:8080"
-      # BitTorrent peer port stays public so peers can open incoming connections.
+      - "8080:8080"
       - "6881:6881"
       - "6881:6881/udp"
     volumes:
@@ -46,8 +44,7 @@ services:
     env_file:
       - .env
     ports:
-      # Localhost only; reached through the host's reverse proxy (HTTPS).
-      - "127.0.0.1:8081:8081"
+      - "8081:8081"
     volumes:
       - ./volumes/downloads:/srv/downloads:ro
     restart: unless-stopped

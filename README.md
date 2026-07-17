@@ -41,9 +41,8 @@ This project runs a Telegram bot that can queue torrents in qBittorrent, track p
      docker compose logs qbittorrent | rg -i "temporary password|admin password|password"
      ```
 
-   - Open the qBittorrent Web UI and sign in with the temporary password. The Web UI is
-     bound to `127.0.0.1:8080`, so reach it from the server itself (`http://localhost:8080`),
-     over an SSH tunnel, or via your qBittorrent subdomain through the reverse proxy.
+   - Open the qBittorrent Web UI (`http://localhost:8080` on the server, or via your
+     qBittorrent subdomain through the reverse proxy) and sign in with the temporary password.
    - Change username/password in qBittorrent Web UI to match your `.env` values:
      - `QBITTORRENT_USERNAME`
      - `QBITTORRENT_PASSWORD`
@@ -89,15 +88,14 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 
 - `bot`: Telegram bot application. Reaches Telegram directly, or through `TELEGRAM_PROXY`
   when set. See [Reaching Telegram through a proxy](#reaching-telegram-through-a-proxy).
-- `qbittorrent`: torrent engine + Web UI (Web UI published on `127.0.0.1:8080`; the
-  BitTorrent peer port `6881` stays public so peers can connect).
-- `file-server`: serves completed downloads over HTTP (published on `127.0.0.1:8081`).
+- `qbittorrent`: torrent engine + Web UI (published on `8080`; peer port `6881` public).
+- `file-server`: serves completed downloads over HTTP (published on `8081`).
 
-The HTTP surfaces (qBittorrent Web UI, file server) are published on `127.0.0.1` only, so
-they are never exposed as plaintext on the public IP. Reach them through a reverse proxy
-on the host (nginx + Let's Encrypt, Caddy, etc.) that terminates HTTPS and maps your
-subdomains to `127.0.0.1:8080` / `:8081`. This repo does not ship its own reverse-proxy
-container.
+The HTTP surfaces (qBittorrent Web UI, file server) publish plain-HTTP ports on the host.
+Front them with a reverse proxy on the host (nginx + Let's Encrypt, Caddy, etc.) that
+terminates HTTPS and maps your subdomains to them. This repo does not ship its own
+reverse-proxy container. Download links are signed, expiring tokens, so the file server
+is safe to reach over plain HTTP; still put TLS in front for privacy of the traffic.
 
 ## qBittorrent first-run notes
 
