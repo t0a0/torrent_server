@@ -24,9 +24,7 @@ This project runs a Telegram bot that can queue torrents in qBittorrent, track p
    mkdir -p \
      volumes/downloads \
      volumes/auth \
-     volumes/qbittorrent_config \
-     volumes/nginxproxymanager/data \
-     volumes/nginxproxymanager/letsencrypt
+     volumes/qbittorrent_config
    ```
 
 5. **Start services**:
@@ -43,7 +41,9 @@ This project runs a Telegram bot that can queue torrents in qBittorrent, track p
      docker compose logs qbittorrent | rg -i "temporary password|admin password|password"
      ```
 
-   - Open qBittorrent Web UI (`http://localhost:8080`) and sign in with the temporary password.
+   - Open the qBittorrent Web UI and sign in with the temporary password. The Web UI is
+     bound to `127.0.0.1:8080`, so reach it from the server itself (`http://localhost:8080`),
+     over an SSH tunnel, or via your qBittorrent subdomain through the reverse proxy.
    - Change username/password in qBittorrent Web UI to match your `.env` values:
      - `QBITTORRENT_USERNAME`
      - `QBITTORRENT_PASSWORD`
@@ -64,6 +64,7 @@ Rename `.env.example` to `.env` and fill all values.
 |---|---:|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram Bot API token from BotFather. |
 | `BOT_OWNER_USER_ID` | Yes | Telegram `user_id` of the bot owner/admin (allowed to run admin-only commands). |
+| `TELEGRAM_PROXY` | No | Proxy URL for reaching Telegram when it is blocked (`socks5://`, `socks5h://`, `socks4://`, or `http://`; e.g. `socks5h://192.168.29.13:3128`). DNS is resolved at the proxy. Leave blank to connect directly. See [Reaching Telegram through a proxy](#reaching-telegram-through-a-proxy). |
 | `QBITTORRENT_URL` | Yes | qBittorrent Web UI/API URL used by the bot (for Docker Compose default: `http://qbittorrent:8080`). |
 | `QBITTORRENT_USERNAME` | Yes | qBittorrent Web UI username used by the bot API client. |
 | `QBITTORRENT_PASSWORD` | Yes | qBittorrent Web UI password used by the bot API client. |
@@ -86,19 +87,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## Services in `docker-compose.yml`
 
-- `bot`: Telegram bot application.
-- `qbittorrent`: torrent engine + Web UI.
-- `file-server`: serves completed downloads over HTTP.
-- `nginxproxymanager`: reverse proxy manager that can be used for HTTPS/SSL and routing.
+- `bot`: Telegram bot application. Reaches Telegram directly, or through `TELEGRAM_PROXY`
+  when set. See [Reaching Telegram through a proxy](#reaching-telegram-through-a-proxy).
+- `qbittorrent`: torrent engine + Web UI (Web UI published on `127.0.0.1:8080`; the
+  BitTorrent peer port `6881` stays public so peers can connect).
+- `file-server`: serves completed downloads over HTTP (published on `127.0.0.1:8081`).
 
-### Why `nginxproxymanager` is included
-
-`nginxproxymanager` is included for **potential SSL enforcement** and URL routing, including:
-- redirecting custom domain URLs to qBittorrent Web UI,
-- redirecting custom domain URLs to the HFS/file-server endpoint,
-- optionally enforcing HTTP → HTTPS.
-
-Default Nginx Proxy Manager admin UI: `http://localhost:81`.
+The HTTP surfaces (qBittorrent Web UI, file server) are published on `127.0.0.1` only, so
+they are never exposed as plaintext on the public IP. Reach them through a reverse proxy
+on the host (nginx + Let's Encrypt, Caddy, etc.) that terminates HTTPS and maps your
+subdomains to `127.0.0.1:8080` / `:8081`. This repo does not ship its own reverse-proxy
+container.
 
 ## qBittorrent first-run notes
 
@@ -126,6 +125,25 @@ Default Nginx Proxy Manager admin UI: `http://localhost:81`.
 - `/removeuser <user_id>` — remove a user from whitelist.
 - `/whitelist` — list whitelisted users.
 - `/availablespace` — show available disk space.
+
+## Reaching Telegram through a proxy
+
+Where Telegram is blocked, set `TELEGRAM_PROXY` to a proxy the server can reach that can
+itself get out to Telegram. A SOCKS5 proxy is a generic TCP tunnel, so it carries the
+ordinary Bot API traffic and no code change is needed:
+
+```
+TELEGRAM_PROXY=socks5h://192.168.29.13:3128
+```
+
+- Supported schemes: `socks5://`, `socks5h://`, `socks4://`, `http://`. Add
+  `user:pass@` before the host if the proxy requires authentication.
+- DNS is always resolved at the proxy (the `socks5h` behaviour), so a blocked or poisoned
+  local resolver does not matter. `socks5://` and `socks5h://` behave identically here.
+- If Telegram is still unreachable, the bot retries every 30 seconds; the background
+  download workers keep running because they only talk to qBittorrent locally.
+
+To change the proxy, edit `.env` and restart the bot (`docker compose up -d bot`).
 
 ## Queueing without Telegram (fallback)
 
@@ -181,4 +199,5 @@ docker compose logs -f qbittorrent
 
 - Keep your `.env` out of version control.
 - Use strong secrets/passwords in production.
-- If you put qBittorrent and file server behind a public domain, configure TLS via `nginxproxymanager`.
+- If you put qBittorrent or the file server behind a public domain, terminate TLS at a
+  reverse proxy on the host (nginx + Let's Encrypt, Caddy, etc.).

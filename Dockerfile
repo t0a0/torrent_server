@@ -8,6 +8,6 @@ WORKDIR /app
 COPY app /app/app
 
 RUN pip install --upgrade pip \
-    && pip install aiogram python-qbittorrent
+    && pip install aiogram aiohttp-socks python-qbittorrent
 
 CMD ["python", "-m", "app.bot.main"]
