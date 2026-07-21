@@ -27,11 +27,15 @@ This project runs a Telegram bot that can queue torrents in qBittorrent, track p
      volumes/qbittorrent_config
    ```
 
-5. **Start services**:
+5. **Start qBittorrent and the file server first** (not the bot yet):
 
    ```bash
-   docker compose up -d --build
+   docker compose up -d --build qbittorrent file-server
    ```
+
+   > The bot authenticates to qBittorrent on startup. Bringing qBittorrent up
+   > first — and setting its credentials — before starting the bot avoids the
+   > bot failing its initial login on a fresh machine.
 
 6. **Handle first qBittorrent login/password initialization** (important):
    - On first launch, qBittorrent logs a **temporary admin password**.
@@ -47,12 +51,18 @@ This project runs a Telegram bot that can queue torrents in qBittorrent, track p
      - `QBITTORRENT_USERNAME`
      - `QBITTORRENT_PASSWORD`
 
-7. **Restart containers after changing qBittorrent credentials**:
-   - Recommended because the bot initializes its torrent service on startup and may attempt login before qBittorrent has fully persisted updated credentials.
+7. **Persist the new credentials** by stopping qBittorrent gracefully so it
+   writes them to `volumes/qbittorrent_config`:
 
    ```bash
-   docker compose down
-   docker compose up -d
+   docker compose stop qbittorrent
+   docker compose up -d qbittorrent
+   ```
+
+8. **Now start the bot** (once qBittorrent is up with the final credentials):
+
+   ```bash
+   docker compose up -d --build bot
    ```
 
 ## Environment variables
