@@ -12,6 +12,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable
 
+import requests
+
 from qbittorrent import Client
 from qbittorrent.client import LoginRequired
 
@@ -241,14 +243,35 @@ class TorrentService:
         return False
 
     def _login(self) -> None:
-        """Login to qBittorrent Web UI using configured credentials."""
+        """Login to qBittorrent Web UI using configured credentials.
+
+        We deliberately bypass ``Client.login``'s response check. The bundled
+        python-qbittorrent treats only the legacy ``"Ok."`` body as success,
+        whereas qBittorrent 5.x answers a successful login with ``204 No
+        Content`` (empty body). That mismatch leaves the client permanently
+        unauthenticated and every call raising ``LoginRequired``. Keying
+        success off the HTTP status keeps us compatible across versions.
+        """
         if not self._username or not self._password:
             raise ValueError(
                 "qBittorrent requires authentication, but QBITTORRENT_USERNAME and "
                 "QBITTORRENT_PASSWORD are not fully configured."
             )
 
-        self._client.login(username=self._username, password=self._password)
+        session = requests.Session()
+        response = session.post(
+            self._client.url + "auth/login",
+            data={"username": self._username, "password": self._password},
+            verify=self._client.verify,
+        )
+        if response.status_code >= 400 or response.text.strip() == "Fails.":
+            raise LoginRequired(
+                f"qBittorrent login failed ({response.status_code}): "
+                f"{response.text.strip()!r}"
+            )
+
+        self._client.session = session
+        self._client._is_authenticated = True
 
     def _call_with_auth(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         """Call qBittorrent API method and re-authenticate if session expired."""
