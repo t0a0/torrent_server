@@ -17,6 +17,7 @@ class DownloadRecord:
     content_path: Path
     moved_at_unix_seconds: int
     torrent_hash: str | None
+    original_name: str | None
 
 
 class DownloadRecordRepository:
@@ -41,10 +42,14 @@ class DownloadRecordRepository:
                     user_id INTEGER NOT NULL,
                     content_path TEXT NOT NULL,
                     moved_at_unix_seconds INTEGER NOT NULL,
-                    torrent_hash TEXT
+                    torrent_hash TEXT,
+                    original_name TEXT
                 )
                 """
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(download_records)")}
+            if "original_name" not in columns:
+                connection.execute("ALTER TABLE download_records ADD COLUMN original_name TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_download_records_moved_at
@@ -58,22 +63,28 @@ class DownloadRecordRepository:
                 """
             )
 
-    def add_record(self, user_id: int, content_path: Path, torrent_hash: str | None) -> None:
+    def add_record(
+        self,
+        user_id: int,
+        content_path: Path,
+        torrent_hash: str | None,
+        original_name: str | None,
+    ) -> None:
         moved_at_unix_seconds = int(datetime.now(timezone.utc).timestamp())
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO download_records (user_id, content_path, moved_at_unix_seconds, torrent_hash)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO download_records (user_id, content_path, moved_at_unix_seconds, torrent_hash, original_name)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (user_id, str(content_path), moved_at_unix_seconds, torrent_hash),
+                (user_id, str(content_path), moved_at_unix_seconds, torrent_hash, original_name),
             )
 
     def get_all_records(self) -> list[DownloadRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, user_id, content_path, moved_at_unix_seconds, torrent_hash
+                SELECT id, user_id, content_path, moved_at_unix_seconds, torrent_hash, original_name
                 FROM download_records
                 ORDER BY moved_at_unix_seconds ASC, id ASC
                 """
@@ -86,9 +97,25 @@ class DownloadRecordRepository:
                 content_path=Path(str(row["content_path"])),
                 moved_at_unix_seconds=int(row["moved_at_unix_seconds"]),
                 torrent_hash=str(row["torrent_hash"]) if row["torrent_hash"] is not None else None,
+                original_name=str(row["original_name"]) if row["original_name"] is not None else None,
             )
             for row in rows
         ]
+
+    def get_user_original_names(self, user_id: int) -> dict[Path, str]:
+        """Return original payload names keyed by content path; newer records win."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT content_path, original_name
+                FROM download_records
+                WHERE user_id = ? AND original_name IS NOT NULL
+                ORDER BY moved_at_unix_seconds ASC, id ASC
+                """,
+                (user_id,),
+            ).fetchall()
+
+        return {Path(str(row["content_path"])): str(row["original_name"]) for row in rows}
 
     def delete_record(self, record_id: int) -> None:
         with self._connect() as connection:

@@ -134,6 +134,15 @@ is safe to reach over plain HTTP; still put TLS in front for privacy of the traf
 - `/whitelist` — list whitelisted users.
 - `/availablespace` — show available disk space.
 
+## Finished download file names
+
+When a download finishes, its files and folders are renamed to ASCII-only names before
+being exposed through the file server, because `wget` fails on non-ASCII paths (e.g.
+Cyrillic) on some platforms. Non-Latin scripts are transliterated (`Мастер и Маргарита` →
+`Master i Margarita`), apostrophes are dropped, characters Windows cannot store in file
+names (`<>:"/\|?*`) become `_`, and name clashes get a `_2`, `_3`, … suffix. The bot
+still shows the original name in its messages and buttons.
+
 ## Reaching Telegram through a proxy
 
 Where Telegram is blocked, set `TELEGRAM_PROXY` to a proxy the server can reach that can

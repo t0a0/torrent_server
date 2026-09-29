@@ -29,6 +29,7 @@ from .config import (
     get_qbit_global_upload_limit_bytes_per_sec,
 )
 from .download_records import DownloadRecordRepository
+from .filenames import make_tree_names_portable, to_portable_name
 
 
 @dataclass(frozen=True)
@@ -242,6 +243,10 @@ class TorrentService:
 
         return False
 
+    def get_finished_download_original_names(self, user_id: int) -> dict[Path, str]:
+        """Return pre-transliteration names of a user's finished downloads keyed by path."""
+        return self._download_records.get_user_original_names(user_id)
+
     def _login(self) -> None:
         """Login to qBittorrent Web UI using configured credentials.
 
@@ -375,6 +380,7 @@ class TorrentService:
                     user_id=completed_torrent_user_id,
                     content_path=moved_content_path,
                     torrent_hash=torrent_hash,
+                    original_name=completed_content_path.name if completed_content_path is not None else None,
                 )
             self._notify_torrent_completed(completed_torrent)
 
@@ -492,16 +498,17 @@ class TorrentService:
         completed_content_path: Path | None,
         user_id: int | None,
     ) -> Path | None:
-        """Move completed payload from active root into finished downloads root."""
+        """Move completed payload into finished downloads root under ASCII-only names."""
         if completed_content_path is None or user_id is None:
             return completed_content_path
 
         destination_user_root = (self._finished_downloads_root / str(user_id)).resolve()
         destination_user_root.mkdir(parents=True, exist_ok=True)
 
-        destination_path = destination_user_root / completed_content_path.name
+        destination_name = to_portable_name(completed_content_path.name)
+        destination_path = destination_user_root / destination_name
         if destination_path.exists():
-            destination_path = destination_user_root / f"{int(time.time())}_{completed_content_path.name}"
+            destination_path = destination_user_root / f"{int(time.time())}_{destination_name}"
 
         try:
             moved_path = Path(shutil.move(str(completed_content_path), str(destination_path))).resolve()
@@ -513,6 +520,8 @@ class TorrentService:
             )
             return completed_content_path
 
+        if moved_path.is_dir():
+            make_tree_names_portable(moved_path)
         return moved_path
 
     def _cleanup_expired_finished_downloads(self) -> None:
