@@ -290,6 +290,17 @@ def _build_cancel_download_keyboard(user_id: int) -> InlineKeyboardMarkup | None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _get_finished_download_original_names(user_id: int) -> dict[Path, str]:
+    if torrent_service is None:
+        return {}
+    return torrent_service.get_finished_download_original_names(user_id)
+
+
+def _get_finished_download_display_name(entry: Path, original_names: dict[Path, str]) -> str:
+    """Prefer the original (pre-transliteration) name recorded when the payload was moved."""
+    return _get_user_display_torrent_name(original_names.get(entry.resolve(), entry.name))
+
+
 def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> InlineKeyboardMarkup | None:
     user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
     if not user_finished_root.exists() or not user_finished_root.is_dir():
@@ -299,12 +310,13 @@ def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> In
     if not entries:
         return None
 
+    original_names = _get_finished_download_original_names(user_id)
     rows: list[list[InlineKeyboardButton]] = []
     for index, entry in enumerate(entries):
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{_get_user_display_torrent_name(entry.name)} ({_format_size_gb(entry)})",
+                    text=f"{_get_finished_download_display_name(entry, original_names)} ({_format_size_gb(entry)})",
                     callback_data=f"{callback_prefix}:{index}",
                 )
             ]
@@ -350,7 +362,9 @@ def _delete_finished_download(user_id: int, selected_index: int) -> str:
     if not selected_path.exists():
         raise FileNotFoundError("selected_download_missing")
 
-    selected_name_display = escape(_get_user_display_torrent_name(selected_path.name))
+    selected_name_display = escape(
+        _get_finished_download_display_name(selected_path, _get_finished_download_original_names(user_id))
+    )
     if selected_path.is_dir():
         shutil.rmtree(selected_path)
     else:
@@ -383,7 +397,9 @@ def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
         raise FileNotFoundError("selected_download_missing")
 
     content_link = download_link_service.build_user_content_link(user_id=user_id, content_path=selected_path)
-    selected_name_display = escape(_get_user_display_torrent_name(selected_path.name))
+    selected_name_display = escape(
+        _get_finished_download_display_name(selected_path, _get_finished_download_original_names(user_id))
+    )
 
     if selected_path.is_file():
         quoted_output_name = shlex.quote(selected_path.name)

@@ -15,6 +15,7 @@ Primary stack and constraints:
 - No tests are required by default unless explicitly requested.
 - Avoid module-level cached variables for simple configuration getter calls; prefer calling small config functions at usage sites unless caching is required for correctness/performance.
 - For user-facing torrent name display, always use the final display name truncated to the first 64 characters.
+- Finished payloads are stored under ASCII-only (transliterated) names; for user-facing display of finished downloads, prefer the original name stored in download records over the on-disk name.
 
 - For Docker bind mounts, use paths under `./volumes/...` and ensure committed placeholder files (`.gitkeep`) exist for mounted directories.
 
