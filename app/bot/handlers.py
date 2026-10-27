@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from html import escape
 import logging
 import os
@@ -13,6 +14,7 @@ import time
 from pathlib import Path
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -301,6 +303,33 @@ def _get_finished_download_display_name(entry: Path, original_names: dict[Path, 
     return _get_user_display_torrent_name(original_names.get(entry.resolve(), entry.name))
 
 
+def _get_finished_download_entry_id(entry: Path) -> str:
+    """Stable short id of a finished download, derived from its on-disk name.
+
+    Menu buttons carry this id instead of a list position, so a stale menu can never
+    resolve to a different download after the folder contents change.
+    """
+    return hashlib.sha256(entry.name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+
+
+def _resolve_finished_download(user_id: int, entry_id: str) -> Path:
+    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
+    for entry in user_finished_root.iterdir():
+        if _get_finished_download_entry_id(entry) != entry_id:
+            continue
+
+        selected_path = entry.resolve()
+        if user_finished_root not in selected_path.parents:
+            raise ValueError("invalid_selection")
+
+        if not selected_path.exists():
+            raise FileNotFoundError("selected_download_missing")
+
+        return selected_path
+
+    raise FileNotFoundError("selected_download_missing")
+
+
 def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> InlineKeyboardMarkup | None:
     user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
     if not user_finished_root.exists() or not user_finished_root.is_dir():
@@ -312,12 +341,12 @@ def _build_finished_downloads_keyboard(user_id: int, callback_prefix: str) -> In
 
     original_names = _get_finished_download_original_names(user_id)
     rows: list[list[InlineKeyboardButton]] = []
-    for index, entry in enumerate(entries):
+    for entry in entries:
         rows.append(
             [
                 InlineKeyboardButton(
                     text=f"{_get_finished_download_display_name(entry, original_names)} ({_format_size_gb(entry)})",
-                    callback_data=f"{callback_prefix}:{index}",
+                    callback_data=f"{callback_prefix}:{_get_finished_download_entry_id(entry)}",
                 )
             ]
         )
@@ -349,19 +378,8 @@ def _build_finished_users_keyboard(callback_prefix: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _delete_finished_download(user_id: int, selected_index: int) -> str:
-    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
-    entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
-    if selected_index < 0 or selected_index >= len(entries):
-        raise ValueError("invalid_selection")
-
-    selected_path = entries[selected_index].resolve()
-    if user_finished_root not in selected_path.parents:
-        raise ValueError("invalid_selection")
-
-    if not selected_path.exists():
-        raise FileNotFoundError("selected_download_missing")
-
+def _delete_finished_download(user_id: int, entry_id: str) -> str:
+    selected_path = _resolve_finished_download(user_id, entry_id)
     selected_name_display = escape(
         _get_finished_download_display_name(selected_path, _get_finished_download_original_names(user_id))
     )
@@ -373,6 +391,85 @@ def _delete_finished_download(user_id: int, selected_index: int) -> str:
     return f"🗑 Deleted: <b>{selected_name_display}</b>"
 
 
+# Finished downloads currently being deleted, keyed by (folder owner user_id, entry id).
+# Repeat clicks on the same download are ignored until the first deletion finishes.
+_finished_download_deletions_in_progress: set[tuple[int, str]] = set()
+
+
+async def _answer_callback_quietly(callback_query: CallbackQuery, text: str) -> None:
+    """Answer a callback query, tolerating queries Telegram already considers expired."""
+    try:
+        await callback_query.answer(text)
+    except TelegramBadRequest:
+        logger.warning("Callback query expired before it was answered id=%s", callback_query.id)
+
+
+def _get_clicked_button_text(callback_query: CallbackQuery) -> str | None:
+    reply_markup = getattr(callback_query.message, "reply_markup", None)
+    if reply_markup is None:
+        return None
+
+    for row in reply_markup.inline_keyboard:
+        for button in row:
+            if button.callback_data == callback_query.data:
+                return button.text
+    return None
+
+
+async def _delete_finished_download_from_menu(
+    callback_query: CallbackQuery,
+    message: Message,
+    folder_user_id: int,
+    entry_id: str,
+    callback_prefix: str,
+    menu_prompt: str,
+    empty_menu_text: str,
+) -> None:
+    """Delete a finished download picked from a menu, then redraw that menu.
+
+    The click is answered and the menu buttons removed before the (possibly slow) deletion
+    runs, so Telegram's callback deadline is not missed and stale buttons cannot be re-clicked.
+    """
+    deletion_key = (folder_user_id, entry_id)
+    if deletion_key in _finished_download_deletions_in_progress:
+        await _answer_callback_quietly(callback_query, "This download is already being deleted.")
+        return
+
+    _finished_download_deletions_in_progress.add(deletion_key)
+    try:
+        await _answer_callback_quietly(callback_query, "Deleting…")
+
+        clicked_text = _get_clicked_button_text(callback_query)
+        deleting_text = f"🗑 Deleting <b>{escape(clicked_text)}</b>…" if clicked_text else "🗑 Deleting…"
+        try:
+            await message.edit_text(deleting_text, parse_mode="HTML")
+        except TelegramBadRequest:
+            logger.warning("Failed to show deletion progress user_id=%s entry_id=%s", folder_user_id, entry_id)
+
+        try:
+            status_text = await asyncio.to_thread(_delete_finished_download, folder_user_id, entry_id)
+        except FileNotFoundError:
+            status_text = "That download no longer exists."
+        except ValueError:
+            status_text = "Invalid selection."
+        except OSError:
+            logger.exception("Failed to delete finished download user_id=%s entry_id=%s", folder_user_id, entry_id)
+            status_text = "Failed to delete selected download."
+    finally:
+        _finished_download_deletions_in_progress.discard(deletion_key)
+
+    try:
+        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, folder_user_id, callback_prefix)
+    except ValueError:
+        keyboard = None
+
+    if keyboard is None:
+        await message.edit_text(f"{status_text}\n\n{empty_menu_text}", parse_mode="HTML")
+        return
+
+    await message.edit_text(f"{status_text}\n\n{menu_prompt}", reply_markup=keyboard, parse_mode="HTML")
+
+
 def _parse_user_id(raw_user_id: str) -> int:
     try:
         return int(raw_user_id)
@@ -380,22 +477,11 @@ def _parse_user_id(raw_user_id: str) -> int:
         raise ValueError("invalid_user_id") from exc
 
 
-def _build_finished_download_reply(user_id: int, selected_index: int) -> str:
+def _build_finished_download_reply(user_id: int, entry_id: str) -> str:
     if download_link_service is None or not download_link_service.is_configured():
         raise ValueError("download_links_not_configured")
 
-    user_finished_root = _build_user_storage_path(get_finished_downloads_root(), user_id)
-    entries = sorted(user_finished_root.iterdir(), key=lambda item: item.name.lower())
-    if selected_index < 0 or selected_index >= len(entries):
-        raise ValueError("invalid_selection")
-
-    selected_path = entries[selected_index].resolve()
-    if user_finished_root not in selected_path.parents:
-        raise ValueError("invalid_selection")
-
-    if not selected_path.exists():
-        raise FileNotFoundError("selected_download_missing")
-
+    selected_path = _resolve_finished_download(user_id, entry_id)
     content_link = download_link_service.build_user_content_link(user_id=user_id, content_path=selected_path)
     selected_name_display = escape(
         _get_finished_download_display_name(selected_path, _get_finished_download_original_names(user_id))
@@ -801,21 +887,15 @@ async def handle_download_link_click(callback_query: CallbackQuery) -> None:
         return
 
     callback_data = callback_query.data or ""
-    selection_token = callback_data.partition(":")[2].strip()
-    if not selection_token:
-        await callback_query.answer("Invalid selection.", show_alert=True)
-        return
-
-    try:
-        selected_index = int(selection_token)
-    except ValueError:
+    entry_id = callback_data.partition(":")[2].strip()
+    if not entry_id:
         await callback_query.answer("Invalid selection.", show_alert=True)
         return
 
     await callback_query.answer()
 
     try:
-        reply_text = await asyncio.to_thread(_build_finished_download_reply, actor.id, selected_index)
+        reply_text = await asyncio.to_thread(_build_finished_download_reply, actor.id, entry_id)
     except FileNotFoundError:
         await message.answer("That download no longer exists. Run /getdownloadlink again.")
         return
@@ -846,44 +926,19 @@ async def handle_delete_file_click(callback_query: CallbackQuery) -> None:
         return
 
     callback_data = callback_query.data or ""
-    selection_token = callback_data.partition(":")[2].strip()
-    if not selection_token:
+    entry_id = callback_data.partition(":")[2].strip()
+    if not entry_id:
         await callback_query.answer("Invalid selection.", show_alert=True)
         return
 
-    try:
-        selected_index = int(selection_token)
-    except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
-        return
-
-    try:
-        deleted_text = await asyncio.to_thread(_delete_finished_download, actor.id, selected_index)
-    except FileNotFoundError:
-        await callback_query.answer("That download no longer exists.", show_alert=True)
-        return
-    except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
-        return
-    except OSError:
-        await callback_query.answer("Failed to delete selected download.", show_alert=True)
-        return
-
-    await callback_query.answer("Deleted.")
-
-    try:
-        keyboard = await asyncio.to_thread(_build_finished_downloads_keyboard, actor.id, "delete_file")
-    except ValueError:
-        keyboard = None
-
-    if keyboard is None:
-        await message.edit_text(f"{deleted_text}\n\nNo finished downloads left.", parse_mode="HTML")
-        return
-
-    await message.edit_text(
-        f"{deleted_text}\n\nSelect a finished download to delete:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+    await _delete_finished_download_from_menu(
+        callback_query,
+        message,
+        folder_user_id=actor.id,
+        entry_id=entry_id,
+        callback_prefix="delete_file",
+        menu_prompt="Select a finished download to delete:",
+        empty_menu_text="No finished downloads left.",
     )
 
 
@@ -905,49 +960,26 @@ async def handle_delete_admin_file_click(callback_query: CallbackQuery) -> None:
         await callback_query.answer("Invalid selection.", show_alert=True)
         return
 
-    _, selected_user_token, selection_token = parts
+    _, selected_user_token, entry_id = parts
+    entry_id = entry_id.strip()
+    if not entry_id:
+        await callback_query.answer("Invalid selection.", show_alert=True)
+        return
 
     try:
         selected_user_id = _parse_user_id(selected_user_token)
-        selected_index = int(selection_token)
     except ValueError:
         await callback_query.answer("Invalid selection.", show_alert=True)
         return
 
-    try:
-        deleted_text = await asyncio.to_thread(_delete_finished_download, selected_user_id, selected_index)
-    except FileNotFoundError:
-        await callback_query.answer("That download no longer exists.", show_alert=True)
-        return
-    except ValueError:
-        await callback_query.answer("Invalid selection.", show_alert=True)
-        return
-    except OSError:
-        await callback_query.answer("Failed to delete selected download.", show_alert=True)
-        return
-
-    await callback_query.answer("Deleted.")
-
-    try:
-        keyboard = await asyncio.to_thread(
-            _build_finished_downloads_keyboard,
-            selected_user_id,
-            f"delete_admin_file:{selected_user_id}",
-        )
-    except ValueError:
-        keyboard = None
-
-    if keyboard is None:
-        await message.edit_text(
-            f"{deleted_text}\n\nNo finished downloads left for user <code>{selected_user_id}</code>.",
-            parse_mode="HTML",
-        )
-        return
-
-    await message.edit_text(
-        f"{deleted_text}\n\nSelected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
+    await _delete_finished_download_from_menu(
+        callback_query,
+        message,
+        folder_user_id=selected_user_id,
+        entry_id=entry_id,
+        callback_prefix=f"delete_admin_file:{selected_user_id}",
+        menu_prompt=f"Selected user <code>{selected_user_id}</code>. Choose a file/folder to delete:",
+        empty_menu_text=f"No finished downloads left for user <code>{selected_user_id}</code>.",
     )
 
 
